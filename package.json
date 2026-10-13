@@ -1,0 +1,35 @@
+{
+  "name": "cordova-plugin-dni-scanner",
+  "version": "0.1.1",
+  "description": "Offline automatic capture and perspective correction for Argentine DNI cards on Android.",
+  "license": "Apache-2.0",
+  "keywords": [
+    "cordova",
+    "android",
+    "dni",
+    "document",
+    "camera",
+    "camerax",
+    "ecosystem:cordova",
+    "cordova-android"
+  ],
+  "cordova": {
+    "id": "cordova-plugin-dni-scanner",
+    "platforms": [
+      "android"
+    ]
+  },
+  "engines": [
+    {
+      "name": "cordova",
+      "version": ">=11.0.0"
+    }
+  ],
+  "files": [
+    "plugin.xml",
+    "www",
+    "src",
+    "README.md",
+    "LICENSE"
+  ]
+}

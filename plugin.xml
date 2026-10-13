@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
+        xmlns:android="http://schemas.android.com/apk/res/android"
+        id="cordova-plugin-dni-scanner"
+        version="0.1.1">
+    <name>DNI Scanner</name>
+    <description>Offline automatic DNI capture and perspective correction for Android.</description>
+    <license>Apache-2.0</license>
+    <keywords>cordova,android,dni,document,camera,camerax</keywords>
+
+    <engines>
+        <engine name="cordova-android" version=">=11.0.0 &lt;16.0.0" />
+    </engines>
+
+    <js-module src="www/DniScanner.js" name="DniScanner">
+        <clobbers target="DniScanner" />
+    </js-module>
+
+    <platform name="android">
+        <config-file target="res/xml/config.xml" parent="/*">
+            <feature name="DniScanner">
+                <param name="android-package" value="com.crediser.plugins.dniscanner.DniScannerPlugin" />
+                <param name="onload" value="true" />
+            </feature>
+        </config-file>
+
+        <config-file target="AndroidManifest.xml" parent="/manifest">
+            <uses-permission android:name="android.permission.CAMERA" />
+        </config-file>
+
+        <config-file target="AndroidManifest.xml" parent="/manifest/application">
+            <activity
+                android:name="com.crediser.plugins.dniscanner.DniScannerActivity"
+                android:exported="false"
+                android:theme="@style/DniScannerTheme" />
+        </config-file>
+
+        <framework src="src/android/dni-scanner.gradle" custom="true" type="gradleReference" />
+
+        <resource-file src="src/android/res/values/dni_scanner_styles.xml" target="res/values/dni_scanner_styles.xml" />
+
+        <source-file src="src/android/java/DniScannerPlugin.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/DniScannerActivity.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/ScannerConfig.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/ScanModels.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/LumaExtractor.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/DocumentDetector.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/QualityEvaluator.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/MoireDetector.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/StabilityTracker.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/EdgeOcclusionTracker.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/GlareTracker.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/FrameAnalyzer.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/ScannerOverlayView.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/PerspectiveTransformer.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/SideVariantRecognizer.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/StillImageProcessor.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+    </platform>
+</plugin>

@@ -1,0 +1,13 @@
+.gradle/
+build/
+dist/
+node_modules/
+*.iml
+.idea/
+.vscode/
+local.properties
+*.log
+*.apk
+*.aab
+reference-images/
+private-fixtures/
