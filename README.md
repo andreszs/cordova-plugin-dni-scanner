@@ -2,15 +2,16 @@
 
 # cordova-plugin-dni-scanner
 
-Android Cordova plugin for automatic capture of the front or back of an Argentine DNI. It detects the card geometrically, evaluates capture quality, corrects perspective, and returns a cropped color JPEG. Processing is fully local and works offline; the plugin does not use Google services, ML Kit, Firebase, OpenCV, ZXing, analytics, or remote APIs.
+Android and iOS Cordova plugin for automatic capture of the front or back of an Argentine DNI. It detects the card geometrically, evaluates capture quality, corrects perspective, and returns a cropped color JPEG. Processing is fully local and works offline; the plugin does not use Google services, ML Kit, Firebase, OpenCV, ZXing, analytics, or remote APIs.
 
-> Status: functional implementation under active calibration. It has been exercised on Samsung J7, Samsung S7, and Xiaomi devices, but recognition and quality thresholds should be validated with a representative DNI and device sample before production use.
+> Status: functional implementation under active calibration. Android has been exercised on Samsung J7, Samsung S7, and Xiaomi devices. The iOS camera flow, dynamic landscape rotation, guide-aligned analysis, and debug overlay have been exercised on a physical iPhone 11 with Cordova iOS 8.1. Recognition and quality thresholds still require validation with a representative DNI and device matrix before production use on either platform.
 
 ## Table of contents
 
 - [Screenshots](#screenshots)
 - [Compatibility](#compatibility)
 - [Installation](#installation)
+- [Demo app](#demo-app)
 - [Usage](#usage)
   - [Options](#options)
   - [Optional checks](#optional-checks)
@@ -49,7 +50,9 @@ The plugin supports `cordova-android` 11 through 15 from one codebase. It select
 | 14.x | 1.5.2 | compileSdk 35 / AGP 8.7.3 / JDK 17 |
 | 15.x | 1.6.0 | compileSdk 36 / AGP 8.10.1 / JDK 17 |
 
-Unknown toolchain combinations fail at build time rather than silently selecting an unsafe dependency version. The plugin is Android-only.
+Unknown Android toolchain combinations fail at build time rather than silently selecting an unsafe dependency version.
+
+The iOS implementation supports `cordova-ios` 8.x, iOS 13 or newer, and Swift 5 language mode. The reference build uses `cordova-ios` 8.1 and has been deployed to an iPhone 11. It uses only Apple system frameworks, including AVFoundation, Core Motion, Core Image, Vision, UIKit, and WebKit.
 
 ## Installation
 
@@ -66,6 +69,36 @@ cordova plugin add https://github.com/andreszs/cordova-plugin-dni-scanner.git
 ```
 
 The plugin requests only `CAMERA`. Images are written to the application's private cache, so no storage permission is required.
+
+On iOS, the host app must provide a camera-purpose string in `config.xml`:
+
+```xml
+<platform name="ios">
+    <edit-config file="*-Info.plist" mode="merge" target="NSCameraUsageDescription">
+        <string>Usamos la cámara para escanear el DNI.</string>
+    </edit-config>
+</platform>
+```
+
+No Photo Library permission is required. Corrected JPEGs remain in the app's private cache and are exposed to the Cordova WebView through its own local scheme.
+
+To test an unpublished checkout, install it by local path so Cordova uses the working tree instead of the npm release:
+
+```bash
+cordova plugin add /absolute/path/to/cordova-plugin-dni-scanner
+```
+
+## Demo app
+
+The companion demo is maintained in [`com.andreszs.dniscanner.demo`](https://github.com/andreszs/cordova-plugin-demos/tree/main/com.andreszs.dniscanner.demo). It exposes every scan option and quality check, displays the corrected JPEG and complete result payload, and can enable the native diagnostic overlay.
+
+For iOS device validation, install this plugin from a local checkout, add `ios@8.1.0`, select a Development team, and run the demo on a physical iPhone. The simulator build validates integration and compilation but cannot validate camera capture:
+
+```bash
+cordova platform add ios@8.1.0
+cordova build ios --debug --emulator
+cordova run ios --device --debug
+```
 
 ## Usage
 
@@ -107,11 +140,11 @@ Use `side: "back"` to capture the back.
 | --- | --- | --- | --- |
 | `side` | `"front" \| "back"` | required | Requested DNI side. |
 | `autoCapture` | `boolean` | `true` | Only `true` is currently supported. |
-| `orientation` | `"portrait" \| "landscape"` | `"portrait"` | Scanner orientation for this session. |
+| `orientation` | `"portrait" \| "landscape"` | `"portrait"` | Scanner orientation for this session. Landscape follows both physical landscape positions on iOS. |
 | `flashMode` | `"off" \| "auto" \| "on"` | `"off"` | Initial flash mode. `on` uses the torch; `off` is recommended to reduce reflections. |
 | `showCloseButton` | `boolean` | `true` | Shows the native close button. Android Back still cancels when hidden. |
 | `showFlashButton` | `boolean` | `true` | Shows the flash selector when the device has a flash unit. |
-| `debugMode` | `boolean` | `true` | Shows preview/final-image metrics over the camera. It does not change validation. |
+| `debugMode` | `boolean` | `true` | Shows live metrics over the camera. Enabled checks are green inside their threshold and red outside it; disabled checks are gray. It does not change validation. |
 | `maxOutputLongEdge` | integer `640–2048` | `1280` | Maximum long edge of the corrected JPEG. The actual image may be smaller when the capture contains fewer effective pixels. |
 | `guideMarginPercent` | number `0–20` | `3` | Permitted outward margin around the dotted guide, measured as a percentage of the guide's shorter edge. Candidates extending farther are ignored. |
 | `instructionText` | `string \| null` | `""` | Optional text above the guide. Missing, empty, or `null` hides it. |
@@ -129,7 +162,7 @@ Only one scan may run at a time.
 | `documentSize` | Rejects a card that is too close or too far. |
 | `centering` | Requires the card near the guide. |
 | `perspective` | Limits perspective distortion. |
-| `stability` | Requires stable corners and scale across frames. |
+| `stability` | Requires stable corners and scale across frames. On iOS it also rejects device rotation and linear acceleration reported by Core Motion. |
 | `sharpness` | Rejects blur using Laplacian variance. |
 | `brightness` | Rejects under/overexposure and severe clipping. |
 | `glare` | Rejects large localized reflections. |
@@ -179,6 +212,16 @@ A successful scan resolves with metadata and a temporary JPEG:
     "moire": 0.05,
     "moireCoverage": 0.0
   },
+  "motion": {
+    "sensorAvailable": true,
+    "gyroscopeAvailable": true,
+    "accelerationAvailable": true,
+    "sampling": true,
+    "stable": true,
+    "gyroscopeRadPerSecond": 0.018,
+    "linearAcceleration": 0.074,
+    "quietDurationMs": 824
+  },
   "appliedChecks": {
     "documentSize": true,
     "centering": true,
@@ -216,6 +259,7 @@ A successful scan resolves with metadata and a temporary JPEG:
 | `maxOutputLongEdge` | Effective output-size limit requested for this scan. The actual long edge can be smaller. |
 | `guideMarginPercent` | Effective outward detection margin around the dotted guide. |
 | `quality` | Normalized final-image measurements listed below. |
+| `motion` | iOS motion-sensor availability, sampling state, filtered rotation/acceleration, and quiet duration at capture. Measurements are `null` when unavailable. |
 | `appliedChecks` | Effective checks used for the scan. These are configuration flags, not scores. |
 | `recognitionSignals` | Supporting layout features; no code or personal text is decoded. |
 | `perspectiveCorrected` | Always `true` in the current successful-result format. |
@@ -268,13 +312,17 @@ Quality rejection, unknown-side recognition, or a side mismatch do not produce `
 
 ## Architecture and behavior
 
-- CameraX binds `Preview`, `ImageAnalysis`, and `ImageCapture`. Analysis uses a dedicated executor, `STRATEGY_KEEP_ONLY_LATEST`, and frames reduced to at most 512 px.
-- Lightweight Sobel/Hough processing finds and scores a DNI-shaped quadrilateral inside the dotted guide plus `guideMarginPercent`. No general-purpose computer-vision framework is included.
+- Android uses CameraX `Preview`, `ImageAnalysis`, and `ImageCapture`. iOS uses `AVCaptureVideoPreviewLayer`, `AVCaptureVideoDataOutput`, and `AVCapturePhotoOutput`. Both analyze reduced preview frames of at most 512 px away from the UI thread.
+- Android uses local Sobel/Hough processing to find and score a DNI-shaped quadrilateral. iOS uses Apple's on-device Vision rectangle detector. Neither platform includes a third-party computer-vision library, model download, or network service.
+- On iOS, the analysis frame is center-cropped to the same aspect-fill viewport shown by the camera preview. The accepted region is derived from the visible dotted guide, so size, centering, and boundary checks refer to what the user actually sees.
 - Framing, perspective, stability, focus, exposure, glare, shadows, edge obstruction, and display moiré are checked before capture and rechecked on the photograph.
-- Stable valid frames trigger `ImageCapture`; the result is perspective-corrected and saved as JPEG 95 with a configurable maximum long edge (1280 px by default, capped at 2048 px). Colors are preserved without paper-scanner filters.
+- When `checks.stability` is enabled on iOS, Core Motion samples rotation and user acceleration at approximately 50 Hz off the main thread. Movement blocks analysis and the shutter; movement detected after the shutter discards that photo and resumes scanning. Missing, late, or stale sensors fall back to visual stability instead of blocking capture.
+- Stable valid frames trigger native photo capture; the result is perspective-corrected and saved as JPEG 95 with a configurable maximum long edge (1280 px by default, capped at 2048 px). Colors are preserved without paper-scanner filters.
 - A compact 4×3 edge/saturation layout classifier estimates side and generation. It does not decode QR or PDF417 and does not rotate or recognize an upside-down DNI.
 
-The native guide changes from red to yellow to green. A subtle gray outline shows the detected quadrilateral, and one message reports the highest-priority problem. Built-in scanner messages are currently in Spanish. `debugMode` adds a small color-coded metrics panel.
+The native guide changes from red to yellow to green. A subtle gray outline shows the detected quadrilateral, and one message reports the highest-priority problem. Built-in scanner messages are currently in Spanish. `debugMode` adds diagnostic categories for image quality, visual stability, and iOS device movement. Green means accepted, red means rejected, and gray means disabled, unavailable, or not yet sampling.
+
+An iOS landscape session supports both `landscapeLeft` and `landscapeRight`. The preview, analyzed frames, captured photo, overlay, and controls update together when the device is rotated 180 degrees.
 
 With the default `checks.requestedSide: true`, an opposite or unknown side is discarded. An opposite side displays a red warning for three seconds before analysis resumes.
 
@@ -286,6 +334,7 @@ With the default `checks.requestedSide: true`, an opposite or unknown side is di
 | AndroidX ExifInterface | 1.3.2 | Apache-2.0 | JPEG orientation metadata. |
 | Guava `listenablefuture` | 1.0 | Apache-2.0 | Minimal local type required by CameraX; no Google service or network dependency. |
 | AndroidX WebKit | supplied by Cordova | Apache-2.0 | Serves the private JPEG to the WebView; declared `compileOnly`. |
+| Apple AVFoundation / Core Motion / Core Image / Vision / WebKit | iOS system | Apple SDK | Camera, motion stability, rectangle detection, perspective correction, and private JPEG delivery. |
 
 The unused CameraX video stack is excluded. The plugin contains no ML models, native computer-vision libraries, or remote-service SDKs. Plugin source is licensed under Apache-2.0; see [LICENSE](LICENSE).
 
@@ -295,20 +344,33 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 - No Internet permission, uploads, analytics, telemetry, tracking, or crash reporting.
 - No Google Play Services or runtime model downloads.
 - No shared-storage permission; output remains in the application's private cache.
+- The iOS package includes a privacy manifest and uses only the camera-purpose string supplied by the host application. Core Motion does not add a permission prompt for this use.
 
 ## Known limitations
 
 - Side and generation recognition are heuristic and based on a limited reference/calibration set; they are not document-authenticity checks.
 - Glare, shadow, and hand/edge detection are heuristic and may require further device calibration.
+- iOS has been exercised on an iPhone 11, but camera and recognition thresholds still need calibration across additional iPhone generations and representative DNI samples.
 - QR and PDF417 are not decoded. Only automatic capture is supported; there is no manual shutter or Base64 result.
-- Orientation is fixed for each scan. Upside-down documents are not recognized or automatically rotated.
+- The requested portrait/landscape family is fixed for each scan. Either physical landscape position is supported, but an upside-down document inside the guide is not recognized or automatically rotated.
 - Output is temporary cache data and has no plugin-managed retention policy.
 
 ## Tests
 
-`tests/host` contains deterministic tests for geometry, stability, image quality, perspective correction, edge obstruction, and layout classification. Reference DNI images are not included in the published package. Physical-device testing is still required before production release.
+`tests/host` contains deterministic Android tests for geometry, stability, image quality, perspective correction, edge obstruction, and layout classification. `tests/ios` exercises motion fallback, startup, rotation, acceleration, quiet recovery, capture-time movement, and stale samples without Core Motion hardware. The iOS sources are compiled in both simulator and device configurations through the Cordova demo. Reference DNI images are intentionally excluded from the repository and npm package. A physical-device scan remains required before a production release.
 
 ## Changelog
+
+### 0.2.0
+
+- Added a native iOS implementation for Cordova iOS 8 and iOS 13 or newer.
+- Added AVFoundation preview, frame analysis, automatic photo capture, torch/flash control, cancellation, and timeout handling.
+- Added offline Vision rectangle detection, Core Image perspective correction, quality metadata, and the existing coarse side/variant classifier.
+- Added private-cache JPEG delivery through the Cordova iOS app scheme and an iOS privacy manifest.
+- Added synchronized rotation for preview, analysis, capture, controls, and overlay in both landscape positions.
+- Aligned iOS analysis with the visible aspect-fill preview and dotted guide.
+- Matched the Android overlay layout and color-coded debug behavior on iOS.
+- Added Core Motion stability gating before and during capture, visual-only sensor fallback, motion result metadata, and deterministic motion tests.
 
 ### 0.1.1
 

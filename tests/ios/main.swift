@@ -1,0 +1,145 @@
+import Foundation
+
+private struct TestFailure: Error, CustomStringConvertible {
+    let description: String
+}
+
+private func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {
+    if !condition() {
+        throw TestFailure(description: message)
+    }
+}
+
+private let bothSensors = DNIMotionCapabilities(gyroscope: true, acceleration: true)
+
+private func addQuietSamples(
+    to machine: DNIMotionStabilityMachine,
+    from start: TimeInterval,
+    through end: TimeInterval
+) {
+    var timestamp = start
+    while timestamp <= end + 0.000_001 {
+        machine.add(DNIMotionSample(
+            timestamp: timestamp,
+            gyroscopeRadPerSecond: 0.01,
+            linearAcceleration: 0.05
+        ))
+        timestamp += 0.02
+    }
+}
+
+private func stableMachine() -> DNIMotionStabilityMachine {
+    let machine = DNIMotionStabilityMachine()
+    machine.start(capabilities: bothSensors, at: 0)
+    addQuietSamples(to: machine, from: 0, through: 0.72)
+    return machine
+}
+
+private let tests: [(String, () throws -> Void)] = [
+    ("fallback without sensors", {
+        let machine = DNIMotionStabilityMachine()
+        machine.start(
+            capabilities: DNIMotionCapabilities(gyroscope: false, acceleration: false),
+            at: 0
+        )
+        let snapshot = machine.snapshot(at: 0)
+        try expect(!snapshot.sensorAvailable, "sensorAvailable should be false")
+        try expect(!snapshot.sampling, "sampling should be false")
+        try expect(snapshot.stable, "visual-only fallback must be stable")
+    }),
+    ("initial sensor wait and startup fallback", {
+        let machine = DNIMotionStabilityMachine()
+        machine.start(capabilities: bothSensors, at: 0)
+        try expect(!machine.snapshot(at: 0.50).stable, "startup wait must block")
+        let fallback = machine.snapshot(at: 1.01)
+        try expect(!fallback.sampling, "missing sensors should not report sampling")
+        try expect(fallback.stable, "startup timeout must fall back to visual stability")
+    }),
+    ("rotation rejection", {
+        let machine = stableMachine()
+        try expect(machine.snapshot(at: 0.72).stable, "quiet device should be stable")
+        machine.add(DNIMotionSample(
+            timestamp: 0.74,
+            gyroscopeRadPerSecond: 0.50,
+            linearAcceleration: 0.05
+        ))
+        try expect(!machine.snapshot(at: 0.74).stable, "rotation spike must reject")
+    }),
+    ("acceleration rejection", {
+        let machine = stableMachine()
+        machine.add(DNIMotionSample(
+            timestamp: 0.74,
+            gyroscopeRadPerSecond: 0.01,
+            linearAcceleration: 1.10
+        ))
+        try expect(!machine.snapshot(at: 0.74).stable, "acceleration spike must reject")
+    }),
+    ("recovery after 700 ms quiet", {
+        let machine = stableMachine()
+        machine.add(DNIMotionSample(
+            timestamp: 0.74,
+            gyroscopeRadPerSecond: 0.50,
+            linearAcceleration: 1.10
+        ))
+        addQuietSamples(to: machine, from: 0.76, through: 1.80)
+        let recovered = machine.snapshot(at: 1.80)
+        try expect(recovered.stable, "device should recover after the quiet window")
+        try expect(recovered.quietDurationMs >= 700, "quiet duration should reach 700 ms")
+    }),
+    ("movement during capture", {
+        let machine = stableMachine()
+        try expect(machine.beginCapture(at: 0.72), "stable capture should start")
+        machine.add(DNIMotionSample(
+            timestamp: 0.80,
+            gyroscopeRadPerSecond: 0.60,
+            linearAcceleration: 1.20
+        ))
+        addQuietSamples(to: machine, from: 0.82, through: 1.90)
+        let outcome = machine.finishCapture(at: 1.90)
+        try expect(outcome.movementDetected, "capture must retain movement latch")
+        try expect(!outcome.accepted, "moved capture must be discarded")
+    }),
+    ("registered sensor becomes stale", {
+        let machine = stableMachine()
+        let stale = machine.snapshot(at: 1.48)
+        try expect(!stale.sampling, "stale stream should stop sampling")
+        try expect(stale.stable, "stale stream must fall back to visual stability")
+    }),
+    ("public motion metadata schema", {
+        let machine = DNIMotionStabilityMachine()
+        machine.start(
+            capabilities: DNIMotionCapabilities(gyroscope: true, acceleration: false),
+            at: 0
+        )
+        machine.add(DNIMotionSample(
+            timestamp: 0,
+            gyroscopeRadPerSecond: 0.0184,
+            linearAcceleration: nil
+        ))
+        let dictionary = machine.snapshot(at: 0).dictionary
+        let expected = Set([
+            "sensorAvailable", "gyroscopeAvailable", "accelerationAvailable", "sampling",
+            "stable", "gyroscopeRadPerSecond", "linearAcceleration", "quietDurationMs"
+        ])
+        try expect(Set(dictionary.keys) == expected, "motion schema keys changed")
+        try expect(dictionary["gyroscopeRadPerSecond"] as? Double == 0.018, "gyro rounding changed")
+        try expect(dictionary["linearAcceleration"] is NSNull, "missing acceleration must be null")
+    })
+]
+
+var failures = 0
+for (name, test) in tests {
+    do {
+        try test()
+        print("PASS: \(name)")
+    } catch {
+        failures += 1
+        print("FAIL: \(name): \(error)")
+    }
+}
+
+if failures > 0 {
+    exit(1)
+}
+
+print("PASS: \(tests.count) deterministic iOS motion tests")

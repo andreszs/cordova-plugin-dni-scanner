@@ -2,14 +2,16 @@
 <plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
         xmlns:android="http://schemas.android.com/apk/res/android"
         id="cordova-plugin-dni-scanner"
-        version="0.1.1">
+        version="0.2.0">
     <name>DNI Scanner</name>
-    <description>Offline automatic DNI capture and perspective correction for Android.</description>
+    <description>Offline automatic DNI capture and perspective correction for Android and iOS.</description>
     <license>Apache-2.0</license>
-    <keywords>cordova,android,dni,document,camera,camerax</keywords>
+    <keywords>cordova,android,ios,dni,document,camera,camerax,avfoundation</keywords>
 
     <engines>
+        <engine name="cordova" version=">=11.0.0" />
         <engine name="cordova-android" version=">=11.0.0 &lt;16.0.0" />
+        <engine name="cordova-ios" version=">=8.0.0 &lt;9.0.0" />
     </engines>
 
     <js-module src="www/DniScanner.js" name="DniScanner">
@@ -55,5 +57,30 @@
         <source-file src="src/android/java/PerspectiveTransformer.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/SideVariantRecognizer.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/StillImageProcessor.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+    </platform>
+
+    <platform name="ios">
+        <config-file target="config.xml" parent="/*">
+            <feature name="DniScanner">
+                <param name="ios-package" value="DniScanner" />
+                <param name="onload" value="true" />
+            </feature>
+        </config-file>
+
+        <source-file src="src/ios/DniMotionStability.swift" />
+        <source-file src="src/ios/DniMotionMonitor.swift" />
+        <source-file src="src/ios/DniScannerTypes.swift" />
+        <source-file src="src/ios/DniScannerEngine.swift" />
+        <source-file src="src/ios/DniScannerRecognizer.swift" />
+        <source-file src="src/ios/DniScannerOverlayView.swift" />
+        <source-file src="src/ios/DniScannerViewController.swift" />
+        <source-file src="src/ios/DniScannerPlugin.swift" />
+        <resource-file src="src/ios/DniScannerPrivacy.bundle" target="DniScannerPrivacy.bundle" />
+
+        <framework src="AVFoundation.framework" />
+        <framework src="CoreImage.framework" />
+        <framework src="CoreMotion.framework" />
+        <framework src="Vision.framework" />
+        <framework src="WebKit.framework" />
     </platform>
 </plugin>
