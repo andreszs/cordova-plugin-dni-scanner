@@ -1,8 +1,11 @@
-![npm version](https://img.shields.io/npm/v/cordova-plugin-dni-scanner) ![GitHub package.json version](https://img.shields.io/github/package-json/v/andreszs/cordova-plugin-dni-scanner?color=FF6D00&label=master&logo=github)
+![npm version](https://img.shields.io/npm/v/cordova-plugin-dni-scanner) ![GitHub package.json version](https://img.shields.io/github/package-json/v/andreszs/cordova-plugin-dni-scanner?color=FF6D00&label=master&logo=github) [![Android and iOS demo](https://img.shields.io/badge/demo-Android%20%7C%20iOS-2ea44f?logo=apachecordova&logoColor=white)](https://github.com/andreszs/cordova-plugin-demos/tree/main/com.andreszs.dniscanner.demo)
 
 # cordova-plugin-dni-scanner
 
 Android and iOS Cordova plugin for automatic capture of the front or back of an Argentine DNI. It detects the card geometrically, evaluates capture quality, corrects perspective, and returns a cropped color JPEG. Processing is fully local and works offline; the plugin does not use Google services, ML Kit, Firebase, OpenCV, ZXing, analytics, or remote APIs.
+
+> [!TIP]
+> **Want to try it first?** The [`cordova-plugin-demos`](https://github.com/andreszs/cordova-plugin-demos) repository includes a [ready-to-build Android and iOS DNI Scanner demo](https://github.com/andreszs/cordova-plugin-demos/tree/main/com.andreszs.dniscanner.demo) with every capture option and quality check exposed in the UI.
 
 > Status: functional implementation under active calibration. Android has been exercised on Samsung J7, Samsung S7, and Xiaomi devices. The iOS camera flow, dynamic landscape rotation, guide-aligned analysis, and debug overlay have been exercised on a physical iPhone 11 with Cordova iOS 8.1. Recognition and quality thresholds still require validation with a representative DNI and device matrix before production use on either platform.
 
@@ -26,6 +29,8 @@ Android and iOS Cordova plugin for automatic capture of the front or back of an 
 - [Changelog](#changelog)
 
 ## Screenshots
+
+The following screenshots are from the companion [`com.andreszs.dniscanner.demo`](https://github.com/andreszs/cordova-plugin-demos/tree/main/com.andreszs.dniscanner.demo) application.
 
 <table>
   <tr>
@@ -82,23 +87,11 @@ On iOS, the host app must provide a camera-purpose string in `config.xml`:
 
 No Photo Library permission is required. Corrected JPEGs remain in the app's private cache and are exposed to the Cordova WebView through its own local scheme.
 
-To test an unpublished checkout, install it by local path so Cordova uses the working tree instead of the npm release:
-
-```bash
-cordova plugin add /absolute/path/to/cordova-plugin-dni-scanner
-```
-
 ## Demo app
 
-The companion demo is maintained in [`com.andreszs.dniscanner.demo`](https://github.com/andreszs/cordova-plugin-demos/tree/main/com.andreszs.dniscanner.demo). It exposes every scan option and quality check, displays the corrected JPEG and complete result payload, and can enable the native diagnostic overlay.
+The companion project is part of the public [`cordova-plugin-demos`](https://github.com/andreszs/cordova-plugin-demos) repository. Open [`com.andreszs.dniscanner.demo`](https://github.com/andreszs/cordova-plugin-demos/tree/main/com.andreszs.dniscanner.demo) for installation and device deployment instructions.
 
-For iOS device validation, install this plugin from a local checkout, add `ios@8.1.0`, select a Development team, and run the demo on a physical iPhone. The simulator build validates integration and compilation but cannot validate camera capture:
-
-```bash
-cordova platform add ios@8.1.0
-cordova build ios --debug --emulator
-cordova run ios --device --debug
-```
+The demo supports Android and iOS, exposes every scan option and quality check, displays the corrected JPEG and complete result payload, and can enable the native diagnostic overlay. Camera capture must be validated on a physical device.
 
 ## Usage
 
