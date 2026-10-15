@@ -129,7 +129,7 @@ Only one scan may run at a time.
 | `documentSize` | Rejects a card that is too close or too far. |
 | `centering` | Requires the card near the guide. |
 | `perspective` | Limits perspective distortion. |
-| `stability` | Requires stable corners and scale across frames. |
+| `stability` | Requires stable corners and scale across frames. When available, gyroscope and acceleration data also block capture while the device is moving. |
 | `sharpness` | Rejects blur using Laplacian variance. |
 | `brightness` | Rejects under/overexposure and severe clipping. |
 | `glare` | Rejects large localized reflections. |
@@ -179,6 +179,16 @@ A successful scan resolves with metadata and a temporary JPEG:
     "moire": 0.05,
     "moireCoverage": 0.0
   },
+  "motion": {
+    "sensorAvailable": true,
+    "gyroscopeAvailable": true,
+    "accelerationAvailable": true,
+    "sampling": true,
+    "stable": true,
+    "gyroscopeRadPerSecond": 0.018,
+    "linearAcceleration": 0.074,
+    "quietDurationMs": 824
+  },
   "appliedChecks": {
     "documentSize": true,
     "centering": true,
@@ -216,6 +226,7 @@ A successful scan resolves with metadata and a temporary JPEG:
 | `maxOutputLongEdge` | Effective output-size limit requested for this scan. The actual long edge can be smaller. |
 | `guideMarginPercent` | Effective outward detection margin around the dotted guide. |
 | `quality` | Normalized final-image measurements listed below. |
+| `motion` | Inertial-sensor availability and filtered values at capture completion. Missing or inactive sensors fall back to visual stability. |
 | `appliedChecks` | Effective checks used for the scan. These are configuration flags, not scores. |
 | `recognitionSignals` | Supporting layout features; no code or personal text is decoded. |
 | `perspectiveCorrected` | Always `true` in the current successful-result format. |
@@ -270,7 +281,8 @@ Quality rejection, unknown-side recognition, or a side mismatch do not produce `
 
 - CameraX binds `Preview`, `ImageAnalysis`, and `ImageCapture`. Analysis uses a dedicated executor, `STRATEGY_KEEP_ONLY_LATEST`, and frames reduced to at most 512 px.
 - Lightweight Sobel/Hough processing finds and scores a DNI-shaped quadrilateral inside the dotted guide plus `guideMarginPercent`. No general-purpose computer-vision framework is included.
-- Framing, perspective, stability, focus, exposure, glare, shadows, edge obstruction, and display moiré are checked before capture and rechecked on the photograph.
+- Framing, perspective, stability, focus, exposure, glare, shadows, edge obstruction, and display moiré are checked before capture and rechecked on the photograph. Stability combines corner tracking with gyroscope and acceleration data when the device supplies them.
+- Inertial motion is checked again immediately before the shutter and throughout the capture window. A moving capture is discarded and analysis resumes; devices without usable motion sensors retain visual-only stability.
 - Stable valid frames trigger `ImageCapture`; the result is perspective-corrected and saved as JPEG 95 with a configurable maximum long edge (1280 px by default, capped at 2048 px). Colors are preserved without paper-scanner filters.
 - A compact 4×3 edge/saturation layout classifier estimates side and generation. It does not decode QR or PDF417 and does not rotate or recognize an upside-down DNI.
 
@@ -309,6 +321,11 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 `tests/host` contains deterministic tests for geometry, stability, image quality, perspective correction, edge obstruction, and layout classification. Reference DNI images are not included in the published package. Physical-device testing is still required before production release.
 
 ## Changelog
+
+### 0.1.2
+
+- Added optional inertial motion gating through the gyroscope and linear acceleration sensor, with accelerometer fallback.
+- Added pre-shutter and in-capture motion guards plus `motion` result metadata and debug metrics.
 
 ### 0.1.1
 

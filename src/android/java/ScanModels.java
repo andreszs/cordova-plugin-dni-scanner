@@ -397,6 +397,7 @@ final class AnalysisResult {
     final Source source;
     int stableFrameCount;
     long stableDurationMs;
+    MotionSnapshot motion;
 
     AnalysisResult(State state, DocumentDetection detection, QualityMetrics quality,
                    boolean geometryValid, boolean qualityValid, long timestampMs) {

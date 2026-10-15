@@ -2,7 +2,7 @@
 <plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
         xmlns:android="http://schemas.android.com/apk/res/android"
         id="cordova-plugin-dni-scanner"
-        version="0.1.1">
+        version="0.1.2">
     <name>DNI Scanner</name>
     <description>Offline automatic DNI capture and perspective correction for Android.</description>
     <license>Apache-2.0</license>
@@ -42,6 +42,8 @@
         <source-file src="src/android/java/DniScannerPlugin.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/DniScannerActivity.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/ScannerConfig.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/MotionStabilityTracker.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/DeviceMotionMonitor.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/ScanModels.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/LumaExtractor.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/DocumentDetector.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />

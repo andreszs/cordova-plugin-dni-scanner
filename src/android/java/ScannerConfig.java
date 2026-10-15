@@ -147,6 +147,22 @@ final class ScannerConfig {
     // turning that 550 ms hold into several seconds on slow processors.
     final int stableFrames = 3;
     final long stableDurationMs = 550L;
+
+    // Device-motion gating complements corner tracking. Gyroscope rotation is
+    // the strongest blur predictor; linear acceleration catches translation and
+    // hand shake. Raw-spike thresholds react immediately while the smoothed
+    // thresholds avoid making the scanner sensitive to normal sensor noise.
+    final float motionSmoothingFactor = 0.72f;
+    final float maxGyroscopeRadPerSecond = 0.12f;
+    final float maxGyroscopeSpikeRadPerSecond = 0.34f;
+    final float maxLinearAcceleration = 0.34f;
+    final float maxAccelerationSpike = 0.90f;
+    final float accelerometerGravityFilterAlpha = 0.82f;
+    final long motionStableDurationMs = 700L;
+    final long motionSensorStartupTimeoutMs = 1000L;
+    final long motionSensorStaleTimeoutMs = 750L;
+    final long motionRetryMessageDurationMs = 450L;
+
     final long captureDelayMs = 180L;
     final long retryMessageDurationMs = 650L;
     final long wrongSideMessageDurationMs = 3000L;

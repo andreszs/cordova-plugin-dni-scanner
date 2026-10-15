@@ -277,7 +277,29 @@ final class ScannerOverlayView extends View {
             stable,
             checks.stability
         ));
+        MotionSnapshot motion = result.motion;
+        if (motion == null || !motion.available) {
+            rows.add(new DebugRow("sensor movimiento no disponible", true, false));
+        } else if (!motion.sampling) {
+            rows.add(new DebugRow("sensor movimiento sin datos", true, false));
+        } else {
+            rows.add(new DebugRow(
+                String.format(
+                    Locale.US,
+                    "mov g%s a%s %dms",
+                    motionValue(motion.gyroscopeRadPerSecond),
+                    motionValue(motion.linearAcceleration),
+                    motion.quietDurationMs
+                ),
+                motion.stable,
+                checks.stability
+            ));
+        }
         return rows;
+    }
+
+    private String motionValue(float value) {
+        return Float.isNaN(value) ? "--" : String.format(Locale.US, "%.2f", value);
     }
 
     private boolean hasUnevenLighting(QualityMetrics quality) {
