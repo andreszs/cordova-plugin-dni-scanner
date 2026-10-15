@@ -192,6 +192,8 @@ final class DNIImageFactory {
 
 final class DNIEngine {
     static let expectedAspect: CGFloat = 85.60 / 53.98
+    static let minimumObservedAspect: CGFloat = 1.18
+    static let maximumObservedAspect: CGFloat = 2.25
     static let minimumDocumentArea: CGFloat = 0.16
     static let maximumDocumentArea: CGFloat = 0.86
     static let maximumCenterOffset: CGFloat = 0.25
@@ -210,6 +212,7 @@ final class DNIEngine {
     static let requiredStableFrames = 3
     static let requiredStableDurationMs = 550
     private let imageFactory = DNIImageFactory.shared
+    private let geometricDetector = DNIGeometricDocumentDetector()
 
     func analyze(
         raster: DNIRaster,
@@ -247,18 +250,26 @@ final class DNIEngine {
         guideMarginPercent: CGFloat
     ) throws -> DNIDetection? {
         let request = VNDetectRectanglesRequest()
-        request.maximumObservations = 4
-        request.minimumConfidence = 0.45
-        request.minimumAspectRatio = 0.45
-        request.maximumAspectRatio = 0.82
-        request.minimumSize = 0.16
-        request.quadratureTolerance = 35
+        // Vision is the fast primary detector. Its preliminary filters are kept
+        // deliberately broader than the scanner's own geometric validation so
+        // faint outer borders are not displaced by rectangular content inside a DNI.
+        request.maximumObservations = 16
+        request.minimumConfidence = 0.30
+        request.minimumAspectRatio = 0.35
+        request.maximumAspectRatio = 0.90
+        request.minimumSize = 0.10
+        request.quadratureTolerance = 45
 
         let handler = VNImageRequestHandler(cgImage: try raster.cgImage(), orientation: .up)
         try handler.perform([request])
         let observations = request.results ?? []
         let margin = min(allowedRegion.width, allowedRegion.height) * guideMarginPercent / 100
         let permitted = allowedRegion.insetBy(dx: -margin, dy: -margin)
+        let relaxedMinimumArea = Self.minimumDocumentArea * 0.55
+        let relaxedMaximumArea = min(0.96, Self.maximumDocumentArea * 1.18)
+        let targetArea = allowedRegion.width > 0.90 && allowedRegion.height > 0.90
+            ? CGFloat(0.47)
+            : max(0.01, min(0.99, allowedRegion.width * allowedRegion.height))
 
         var selected: DNIDetection?
         for observation in observations {
@@ -271,26 +282,60 @@ final class DNIEngine {
             guard normalized.points.allSatisfy({ permitted.contains($0) }) else { continue }
             let quad = normalized.scaled(x: CGFloat(raster.width), y: CGFloat(raster.height))
             let areaFraction = quad.area / CGFloat(raster.width * raster.height)
+            guard areaFraction >= relaxedMinimumArea,
+                  areaFraction <= relaxedMaximumArea else { continue }
             let center = normalized.center
             let centerOffset = hypot(center.x - 0.5, center.y - 0.5) / hypot(0.5, 0.5)
             let width = (quad.topWidth + quad.bottomWidth) * 0.5
             let height = (quad.leftHeight + quad.rightHeight) * 0.5
             guard height > 1 else { continue }
             let observedAspect = width / height
-            let aspectScore = max(0, 1 - abs(observedAspect - Self.expectedAspect) / 0.8)
-            let score = CGFloat(observation.confidence) * 0.65 + aspectScore * 0.35
+            guard observedAspect >= Self.minimumObservedAspect,
+                  observedAspect <= Self.maximumObservedAspect else { continue }
+            let aspectScore = max(0, 1 - abs(observedAspect - Self.expectedAspect) / 0.75)
+            let areaScore = max(0, 1 - abs(areaFraction - targetArea) / max(0.15, targetArea))
+            let centerScore = max(0, 1 - centerOffset)
+            let score = CGFloat(observation.confidence) * 0.45
+                + aspectScore * 0.25
+                + areaScore * 0.17
+                + centerScore * 0.13
             let candidate = DNIDetection(
                 quad: quad,
                 score: score,
                 areaFraction: areaFraction,
                 centerOffset: centerOffset,
-                observedAspect: observedAspect
+                observedAspect: observedAspect,
+                source: "vision"
             )
             if selected == nil || candidate.score > selected!.score {
                 selected = candidate
             }
         }
-        return selected
+        if let selected { return selected }
+
+        // Match Android when Vision cannot find the outer card: use the same
+        // content-agnostic Sobel/Hough geometry, constrained to the visible guide.
+        guard let fallback = geometricDetector.detect(
+            width: raster.width,
+            height: raster.height,
+            luma: raster.luma,
+            permittedRegion: permitted,
+            targetAreaFraction: targetArea
+        ) else { return nil }
+        let quad = DNIQuad(
+            topLeft: fallback.points[0],
+            topRight: fallback.points[1],
+            bottomRight: fallback.points[2],
+            bottomLeft: fallback.points[3]
+        )
+        return DNIDetection(
+            quad: quad,
+            score: fallback.score,
+            areaFraction: fallback.areaFraction,
+            centerOffset: fallback.centerOffset,
+            observedAspect: fallback.observedAspect,
+            source: "hough"
+        )
     }
 
     func evaluate(raster: DNIRaster, quad: DNIQuad, includeMoire: Bool) -> DNIQuality {

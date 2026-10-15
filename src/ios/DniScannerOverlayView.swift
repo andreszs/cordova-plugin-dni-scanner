@@ -36,7 +36,9 @@ final class DNIOverlayView: UIView {
         let horizontalMargin: CGFloat = 20
         var width = max(1, area.width - horizontalMargin * 2)
         var height = width / DNIEngine.expectedAspect
-        let maximumHeight = area.height * (scanOrientation == "landscape" ? 0.58 : 0.46)
+        let usesLandscapeLayout = scanOrientation == "landscape"
+            || (scanOrientation == "auto" && area.width > area.height)
+        let maximumHeight = area.height * (usesLandscapeLayout ? 0.58 : 0.46)
         if height > maximumHeight {
             height = maximumHeight
             width = height * DNIEngine.expectedAspect
@@ -149,7 +151,7 @@ final class DNIOverlayView: UIView {
             && current.stableDurationMs >= DNIEngine.requiredStableDurationMs
 
         return [
-            DebugRow(text: "fuente preview", acceptable: true, enabled: false),
+            DebugRow(text: "detector \(detection.source)", acceptable: true, enabled: false),
             DebugRow(
                 text: String(format: "area %.3f", detection.areaFraction),
                 acceptable: detection.areaFraction >= DNIEngine.minimumDocumentArea

@@ -156,8 +156,10 @@ struct DNIOptions {
             throw DNIError.invalidArgument("La opción flashMode debe ser 'off', 'auto' u 'on'.")
         }
         let orientation = dictionary["orientation"] as? String ?? "portrait"
-        guard ["portrait", "landscape"].contains(orientation) else {
-            throw DNIError.invalidArgument("La opción orientation debe ser 'portrait' o 'landscape'.")
+        guard ["portrait", "landscape", "auto"].contains(orientation) else {
+            throw DNIError.invalidArgument(
+                "La opción orientation debe ser 'portrait', 'landscape' o 'auto'."
+            )
         }
 
         func strictBool(_ name: String, fallback: Bool) throws -> Bool {
@@ -222,6 +224,39 @@ struct DNIOptions {
     }
 }
 
+enum DNIEffectiveOrientation: String {
+    case portrait
+    case landscapeLeft
+    case landscapeRight
+
+    var isLandscape: Bool {
+        return self == .landscapeLeft || self == .landscapeRight
+    }
+}
+
+/// Keeps the orientation used at the start of automatic capture immutable until
+/// AVCapturePhotoOutput responds. The accepted orientation remains available for
+/// result metadata even after autorotation is re-enabled.
+struct DNICaptureOrientationState {
+    private(set) var locked: DNIEffectiveOrientation?
+    private(set) var captured: DNIEffectiveOrientation?
+
+    mutating func beginCapture(at orientation: DNIEffectiveOrientation) {
+        guard locked == nil else { return }
+        locked = orientation
+        captured = orientation
+    }
+
+    mutating func receivePhoto() {
+        locked = nil
+    }
+
+    mutating func discardPhoto() {
+        locked = nil
+        captured = nil
+    }
+}
+
 struct DNIQuad {
     let topLeft: CGPoint
     let topRight: CGPoint
@@ -276,6 +311,23 @@ struct DNIDetection {
     let areaFraction: CGFloat
     let centerOffset: CGFloat
     let observedAspect: CGFloat
+    let source: String
+
+    init(
+        quad: DNIQuad,
+        score: CGFloat,
+        areaFraction: CGFloat,
+        centerOffset: CGFloat,
+        observedAspect: CGFloat,
+        source: String = "vision"
+    ) {
+        self.quad = quad
+        self.score = score
+        self.areaFraction = areaFraction
+        self.centerOffset = centerOffset
+        self.observedAspect = observedAspect
+        self.source = source
+    }
 }
 
 struct DNIQuality {

@@ -37,6 +37,8 @@ final class DNIViewController: UIViewController {
     private var lastAnalysisTime: CFTimeInterval = 0
     private var captureInProgress = false
     private var completed = false
+    private var orientationTransitionInProgress = false
+    private var captureOrientationState = DNICaptureOrientationState()
     private var previousQuad: DNIQuad?
     private var previousArea: CGFloat = 0
     private var stableSince: CFTimeInterval = 0
@@ -47,6 +49,12 @@ final class DNIViewController: UIViewController {
     private var acceptedMotionSnapshot: DNIMotionSnapshot?
 
     var effectiveFlashMode: String { currentFlashMode }
+    var effectiveCaptureOrientation: String {
+        stateLock.lock()
+        let captured = captureOrientationState.captured
+        stateLock.unlock()
+        return (captured ?? currentEffectiveOrientation()).rawValue
+    }
 
     init(options: DNIOptions) {
         self.options = options
@@ -62,12 +70,23 @@ final class DNIViewController: UIViewController {
 
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
-    override var shouldAutorotate: Bool { true }
+    override var shouldAutorotate: Bool { lockedCaptureOrientation == nil }
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        return options.orientation == "landscape" ? .landscape : .portrait
+        if let locked = lockedCaptureOrientation {
+            return interfaceOrientationMask(for: locked)
+        }
+        switch options.orientation {
+        case "landscape": return .landscape
+        case "auto": return .allButUpsideDown
+        default: return .portrait
+        }
     }
     override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
-        return options.orientation == "landscape" ? .landscapeRight : .portrait
+        switch options.orientation {
+        case "landscape": return .landscapeRight
+        case "auto": return interfaceOrientation(for: currentEffectiveOrientation())
+        default: return .portrait
+        }
     }
 
     override func viewDidLoad() {
@@ -129,13 +148,18 @@ final class DNIViewController: UIViewController {
         to size: CGSize,
         with coordinator: UIViewControllerTransitionCoordinator
     ) {
+        setOrientationTransitionInProgress(true)
+        resetStability()
         super.viewWillTransition(to: size, with: coordinator)
         coordinator.animate(alongsideTransition: { [weak self] _ in
             self?.previewLayer.frame = CGRect(origin: .zero, size: size)
         }, completion: { [weak self] _ in
             guard let self = self else { return }
             self.previewLayer.frame = self.view.bounds
+            self.overlayView.setNeedsDisplay()
+            self.updatePreviewGeometry()
             self.updateVideoOrientation()
+            self.setOrientationTransitionInProgress(false)
         })
     }
 
@@ -265,14 +289,57 @@ final class DNIViewController: UIViewController {
     }
 
     private func currentVideoOrientation() -> AVCaptureVideoOrientation {
-        guard options.orientation == "landscape" else { return .portrait }
+        if let locked = lockedCaptureOrientation {
+            return videoOrientation(for: locked)
+        }
+        guard options.orientation != "portrait" else { return .portrait }
         switch view.window?.windowScene?.interfaceOrientation {
         case .landscapeLeft:
             return .landscapeLeft
         case .landscapeRight:
             return .landscapeRight
+        case .portrait where options.orientation == "auto":
+            return .portrait
         default:
-            return .landscapeRight
+            return options.orientation == "landscape" ? .landscapeRight : .portrait
+        }
+    }
+
+    private func currentEffectiveOrientation() -> DNIEffectiveOrientation {
+        switch currentVideoOrientation() {
+        case .landscapeLeft: return .landscapeLeft
+        case .landscapeRight: return .landscapeRight
+        default: return .portrait
+        }
+    }
+
+    private func videoOrientation(
+        for orientation: DNIEffectiveOrientation
+    ) -> AVCaptureVideoOrientation {
+        switch orientation {
+        case .portrait: return .portrait
+        case .landscapeLeft: return .landscapeLeft
+        case .landscapeRight: return .landscapeRight
+        }
+    }
+
+    private func interfaceOrientation(
+        for orientation: DNIEffectiveOrientation
+    ) -> UIInterfaceOrientation {
+        switch orientation {
+        case .portrait: return .portrait
+        case .landscapeLeft: return .landscapeLeft
+        case .landscapeRight: return .landscapeRight
+        }
+    }
+
+    private func interfaceOrientationMask(
+        for orientation: DNIEffectiveOrientation
+    ) -> UIInterfaceOrientationMask {
+        switch orientation {
+        case .portrait: return .portrait
+        case .landscapeLeft: return .landscapeLeft
+        case .landscapeRight: return .landscapeRight
         }
     }
 
@@ -362,19 +429,71 @@ final class DNIViewController: UIViewController {
         return captureInProgress
     }
 
+    private var lockedCaptureOrientation: DNIEffectiveOrientation? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return captureOrientationState.locked
+    }
+
+    private var isOrientationTransitioning: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return orientationTransitionInProgress
+    }
+
     private func setCapturing(_ value: Bool) {
         stateLock.lock()
         captureInProgress = value
         stateLock.unlock()
     }
 
+    private func setOrientationTransitionInProgress(_ value: Bool) {
+        stateLock.lock()
+        orientationTransitionInProgress = value
+        stateLock.unlock()
+    }
+
+    private func lockCaptureOrientation() {
+        let effective = currentEffectiveOrientation()
+        stateLock.lock()
+        captureOrientationState.beginCapture(at: effective)
+        stateLock.unlock()
+        if #available(iOS 16.0, *) {
+            setNeedsUpdateOfSupportedInterfaceOrientations()
+        }
+        updateVideoOrientation()
+    }
+
+    private func releaseCaptureOrientation(preservingCapturedOrientation: Bool) {
+        stateLock.lock()
+        if preservingCapturedOrientation {
+            captureOrientationState.receivePhoto()
+        } else {
+            captureOrientationState.discardPhoto()
+        }
+        stateLock.unlock()
+        guard options.orientation == "auto" else { return }
+        if #available(iOS 16.0, *) {
+            setNeedsUpdateOfSupportedInterfaceOrientations()
+        }
+        UIViewController.attemptRotationToDeviceOrientation()
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.overlayView.setNeedsDisplay()
+            self.updatePreviewGeometry()
+            self.updateVideoOrientation()
+        }
+    }
+
     private func beginAutomaticCapture(_ analysis: DNIAnalysis) {
-        guard !isCapturing, !isCompleted, photoOutput != nil else { return }
+        guard !isCapturing, !isCompleted, !isOrientationTransitioning,
+              photoOutput != nil else { return }
         if options.checks.stability, !motionMonitor.beginCapture() {
             resetStability()
             overlayView.update(analysis, message: message(for: .holdStill))
             return
         }
+        lockCaptureOrientation()
         setCapturing(true)
         var capturing = analysis
         capturing = DNIAnalysis(
@@ -394,7 +513,14 @@ final class DNIViewController: UIViewController {
     }
 
     private func capturePhoto() {
-        guard let output = photoOutput, !isCompleted else { return }
+        guard !isCompleted else { return }
+        guard let output = photoOutput else {
+            motionMonitor.cancelCapture()
+            releaseCaptureOrientation(preservingCapturedOrientation: false)
+            setCapturing(false)
+            fail(.captureFailed("La salida fotográfica dejó de estar disponible.", true))
+            return
+        }
         if options.checks.stability, !motionMonitor.captureMayProceed() {
             motionMonitor.cancelCapture()
             resumeAfterMotion()
@@ -450,6 +576,7 @@ final class DNIViewController: UIViewController {
     private func retry(message: String, delay: TimeInterval) {
         guard !isCompleted else { return }
         motionMonitor.cancelCapture()
+        releaseCaptureOrientation(preservingCapturedOrientation: false)
         resetStability()
         overlayView.update(nil, message: message)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -470,6 +597,7 @@ final class DNIViewController: UIViewController {
         guard !isCompleted else { return }
         resetStability()
         setCapturing(false)
+        releaseCaptureOrientation(preservingCapturedOrientation: false)
         overlayView.update(nil, message: message(for: .holdStill))
     }
 
@@ -599,7 +727,7 @@ extension DNIViewController: AVCaptureVideoDataOutputSampleBufferDelegate {
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        guard !isCompleted, !isCapturing else { return }
+        guard !isCompleted, !isCapturing, !isOrientationTransitioning else { return }
         let now = CACurrentMediaTime()
         guard now - lastAnalysisTime >= 0.10 else { return }
         lastAnalysisTime = now
@@ -632,6 +760,7 @@ extension DNIViewController: AVCapturePhotoCaptureDelegate {
         didFinishProcessingPhoto photo: AVCapturePhoto,
         error: Error?
     ) {
+        let motionSnapshot: DNIMotionSnapshot
         if options.checks.stability {
             let motionOutcome = motionMonitor.finishCapture()
             if !motionOutcome.accepted {
@@ -640,22 +769,47 @@ extension DNIViewController: AVCapturePhotoCaptureDelegate {
                 }
                 return
             }
-            acceptedMotionSnapshot = motionOutcome.snapshot
+            motionSnapshot = motionOutcome.snapshot
         } else {
-            acceptedMotionSnapshot = motionMonitor.snapshot()
+            motionSnapshot = motionMonitor.snapshot()
         }
-        if let error = error {
-            DispatchQueue.main.async {
-                self.fail(.captureFailed("No se pudo tomar la fotografía: \(error.localizedDescription)", true))
+        let data = photo.fileDataRepresentation()
+        let flashFired = photo.resolvedSettings.isFlashEnabled
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, !self.isCompleted else { return }
+            self.releaseCaptureOrientation(preservingCapturedOrientation: error == nil && data != nil)
+            self.acceptedMotionSnapshot = motionSnapshot
+            if let error = error {
+                self.fail(.captureFailed(
+                    "No se pudo tomar la fotografía: \(error.localizedDescription)",
+                    true
+                ))
+                return
             }
-            return
-        }
-        guard let data = photo.fileDataRepresentation() else {
-            DispatchQueue.main.async {
+            guard let data = data else {
                 self.fail(.captureFailed("La cámara no devolvió la fotografía capturada.", true))
+                return
             }
-            return
+            self.processPhoto(data, flashFired: flashFired)
         }
-        processPhoto(data, flashFired: photo.resolvedSettings.isFlashEnabled)
+    }
+
+    func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings,
+        error: Error?
+    ) {
+        guard let error = error else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, !self.isCompleted,
+                  self.lockedCaptureOrientation != nil else { return }
+            self.motionMonitor.cancelCapture()
+            self.releaseCaptureOrientation(preservingCapturedOrientation: false)
+            self.setCapturing(false)
+            self.fail(.captureFailed(
+                "No se pudo completar la fotografía: \(error.localizedDescription)",
+                true
+            ))
+        }
     }
 }

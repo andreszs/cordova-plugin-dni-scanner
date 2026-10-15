@@ -107,7 +107,7 @@ cordova run ios --device --debug
 ```javascript
 const result = await DniScanner.scan({
     side: "front",
-    orientation: "portrait",
+    orientation: "auto",
     flashMode: "off",
     showCloseButton: true,
     showFlashButton: false,
@@ -140,7 +140,7 @@ Use `side: "back"` to capture the back.
 | --- | --- | --- | --- |
 | `side` | `"front" \| "back"` | required | Requested DNI side. |
 | `autoCapture` | `boolean` | `true` | Only `true` is currently supported. |
-| `orientation` | `"portrait" \| "landscape"` | `"portrait"` | Scanner orientation for this session. Landscape follows both physical landscape positions on iOS. |
+| `orientation` | `"portrait" \| "landscape" \| "auto"` | `"portrait"` | Scanner orientation for this session. `auto` follows the phone while scanning; capture briefly locks the current orientation. Fixed landscape follows both physical landscape positions on iOS. |
 | `flashMode` | `"off" \| "auto" \| "on"` | `"off"` | Initial flash mode. `on` uses the torch; `off` is recommended to reduce reflections. |
 | `showCloseButton` | `boolean` | `true` | Shows the native close button. Android Back still cancels when hidden. |
 | `showFlashButton` | `boolean` | `true` | Shows the flash selector when the device has a flash unit. |
@@ -239,6 +239,7 @@ A successful scan resolves with metadata and a temporary JPEG:
   "perspectiveCorrected": true,
   "flashMode": "off",
   "orientation": "portrait",
+  "orientationMode": "auto",
   "debugMode": false,
   "flashFired": false,
   "capturedAt": "2026-10-07T15:30:00.000Z"
@@ -263,7 +264,8 @@ A successful scan resolves with metadata and a temporary JPEG:
 | `appliedChecks` | Effective checks used for the scan. These are configuration flags, not scores. |
 | `recognitionSignals` | Supporting layout features; no code or personal text is decoded. |
 | `perspectiveCorrected` | Always `true` in the current successful-result format. |
-| `flashMode` / `orientation` / `debugMode` | Effective session configuration. |
+| `flashMode` / `orientation` / `debugMode` | Effective session configuration. `orientation` is the physical orientation used for the accepted photo. |
+| `orientationMode` | Requested orientation mode: `"portrait"`, `"landscape"`, or `"auto"`. |
 | `flashFired` | `true`/`false`, or `null` in automatic mode where CameraX cannot report it reliably. |
 | `capturedAt` | ISO 8601 UTC completion timestamp. |
 
@@ -313,7 +315,7 @@ Quality rejection, unknown-side recognition, or a side mismatch do not produce `
 ## Architecture and behavior
 
 - Android uses CameraX `Preview`, `ImageAnalysis`, and `ImageCapture`. iOS uses `AVCaptureVideoPreviewLayer`, `AVCaptureVideoDataOutput`, and `AVCapturePhotoOutput`. Both analyze reduced preview frames of at most 512 px away from the UI thread.
-- Android uses local Sobel/Hough processing to find and score a DNI-shaped quadrilateral. iOS uses Apple's on-device Vision rectangle detector. Neither platform includes a third-party computer-vision library, model download, or network service.
+- Android uses local Sobel/Hough processing to find and score a DNI-shaped quadrilateral. iOS uses Apple's on-device Vision rectangle detector first and a lightweight local Sobel/Hough fallback when Vision misses a plausible outer edge. Neither platform includes a third-party computer-vision library, model download, or network service.
 - On iOS, the analysis frame is center-cropped to the same aspect-fill viewport shown by the camera preview. The accepted region is derived from the visible dotted guide, so size, centering, and boundary checks refer to what the user actually sees.
 - Framing, perspective, stability, focus, exposure, glare, shadows, edge obstruction, and display moiré are checked before capture and rechecked on the photograph.
 - When `checks.stability` is enabled, Android uses the device gyroscope and acceleration sensors while iOS samples rotation and user acceleration through Core Motion at approximately 50 Hz. Movement blocks analysis and the shutter; movement detected during capture discards that photo and resumes scanning. Missing, late, or stale sensors fall back to visual stability instead of blocking capture.
@@ -352,7 +354,7 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 - Glare, shadow, and hand/edge detection are heuristic and may require further device calibration.
 - iOS has been exercised on an iPhone 11, but camera and recognition thresholds still need calibration across additional iPhone generations and representative DNI samples.
 - QR and PDF417 are not decoded. Only automatic capture is supported; there is no manual shutter or Base64 result.
-- The requested portrait/landscape family is fixed for each scan. Either physical landscape position is supported, but an upside-down document inside the guide is not recognized or automatically rotated.
+- Fixed portrait or landscape mode keeps that orientation family for the scan; `auto` follows the device between portrait and landscape. An upside-down document inside the guide is not recognized or automatically corrected.
 - Output is temporary cache data and has no plugin-managed retention policy.
 
 ## Tests
@@ -363,9 +365,12 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 
 ### 0.2.0
 
+- Added `orientation: "auto"` so preview, analysis, capture guide, and controls follow device rotation while scanning.
+- Added effective `orientation` and requested `orientationMode` result metadata.
 - Added a native iOS implementation for Cordova iOS 8 and iOS 13 or newer.
 - Added AVFoundation preview, frame analysis, automatic photo capture, torch/flash control, cancellation, and timeout handling.
 - Added offline Vision rectangle detection, Core Image perspective correction, quality metadata, and the existing coarse side/variant classifier.
+- Added a lightweight iOS geometric fallback constrained to the visible guide for DNI edges that Vision does not return reliably.
 - Added private-cache JPEG delivery through the Cordova iOS app scheme and an iOS privacy manifest.
 - Added synchronized rotation for preview, analysis, capture, controls, and overlay in both landscape positions.
 - Aligned iOS analysis with the visible aspect-fill preview and dotted guide.

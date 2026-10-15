@@ -33,6 +33,7 @@
         <config-file target="AndroidManifest.xml" parent="/manifest/application">
             <activity
                 android:name="com.crediser.plugins.dniscanner.DniScannerActivity"
+                android:configChanges="orientation|screenSize"
                 android:exported="false"
                 android:theme="@style/DniScannerTheme" />
         </config-file>
@@ -73,6 +74,7 @@
         <source-file src="src/ios/DniMotionMonitor.swift" />
         <source-file src="src/ios/DniScannerTypes.swift" />
         <source-file src="src/ios/DniScannerEngine.swift" />
+        <source-file src="src/ios/DniGeometricDocumentDetector.swift" />
         <source-file src="src/ios/DniScannerRecognizer.swift" />
         <source-file src="src/ios/DniScannerOverlayView.swift" />
         <source-file src="src/ios/DniScannerViewController.swift" />

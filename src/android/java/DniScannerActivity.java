@@ -1,6 +1,7 @@
 package com.crediser.plugins.dniscanner;
 
 import android.app.Activity;
+import android.content.res.Configuration;
 import android.content.pm.ActivityInfo;
 import android.content.Intent;
 import android.graphics.Color;
@@ -10,6 +11,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
+import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -86,12 +88,14 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     private long timeoutMs;
     private boolean capturing;
     private boolean completed;
+    private boolean rebindingForRotation;
     private Runnable timeoutRunnable;
     private AnalysisResult latestAnalysis;
     private int latestFrameWidth;
     private int latestFrameHeight;
     private long captureMotionSequence;
     private MotionSnapshot capturedMotion;
+    private String capturedOrientation;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -130,9 +134,13 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             return;
         }
 
-        setRequestedOrientation("landscape".equals(scanOrientation)
-            ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            : ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT);
+        if ("auto".equals(scanOrientation)) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
+        } else {
+            setRequestedOrientation("landscape".equals(scanOrientation)
+                ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                : ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT);
+        }
 
         createUserInterface();
         scheduleTimeout();
@@ -143,6 +151,15 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     @Override
     public Lifecycle getLifecycle() {
         return lifecycleRegistry;
+    }
+
+    @Override
+    public void onConfigurationChanged(@NonNull Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (!"auto".equals(scanOrientation) || completed || capturing) {
+            return;
+        }
+        rebindCameraAfterRotation();
     }
 
     @Override
@@ -303,12 +320,22 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     }
 
     private void bindCameraUseCases() {
+        if (frameAnalyzer != null) {
+            frameAnalyzer.setEnabled(false);
+        }
+        if (imageAnalysis != null) {
+            imageAnalysis.clearAnalyzer();
+        }
         cameraProvider.unbindAll();
-        Preview preview = new Preview.Builder().build();
+        int targetRotation = currentDisplayRotation();
+        Preview preview = new Preview.Builder()
+            .setTargetRotation(targetRotation)
+            .build();
         preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
         imageAnalysis = new ImageAnalysis.Builder()
             .setTargetResolution(new android.util.Size(1280, 720))
+            .setTargetRotation(targetRotation)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build();
         detectionRegion = overlayView.detectionRegion(config.guideMarginFraction);
@@ -323,6 +350,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             : ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY;
         imageCapture = new ImageCapture.Builder()
             .setCaptureMode(captureMode)
+            .setTargetRotation(targetRotation)
             .build();
 
         try {
@@ -347,13 +375,66 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
                 flashMode = "off";
             }
             applyFlashMode();
+            rebindingForRotation = false;
         } catch (Exception error) {
             finishWithError("CAMERA_UNAVAILABLE", "No se pudo configurar la cámara.", true);
         }
     }
 
+    private void rebindCameraAfterRotation() {
+        rebindingForRotation = true;
+        latestAnalysis = null;
+        latestFrameWidth = 0;
+        latestFrameHeight = 0;
+        if (frameAnalyzer != null) {
+            frameAnalyzer.setEnabled(false);
+        }
+        if (imageAnalysis != null) {
+            imageAnalysis.clearAnalyzer();
+        }
+        if (cameraProvider != null) {
+            cameraProvider.unbindAll();
+        }
+        imageCapture = null;
+        camera = null;
+        overlayView.update(null, 0, 0, "Girando cámara…", Color.WHITE);
+        overlayView.post(() -> {
+            if (completed || isFinishing() || capturing || cameraProvider == null) {
+                return;
+            }
+            bindCameraUseCases();
+        });
+    }
+
+    private int currentDisplayRotation() {
+        return previewView.getDisplay() == null
+            ? Surface.ROTATION_0
+            : previewView.getDisplay().getRotation();
+    }
+
+    private String currentOrientation() {
+        return getResources().getConfiguration().orientation
+            == Configuration.ORIENTATION_LANDSCAPE ? "landscape" : "portrait";
+    }
+
+    private void lockAutoOrientationForCapture() {
+        if ("auto".equals(scanOrientation)) {
+            capturedOrientation = currentOrientation();
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LOCKED);
+        }
+    }
+
+    private void unlockAutoOrientationAfterRetry() {
+        if ("auto".equals(scanOrientation) && !completed && !isFinishing()) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
+        }
+    }
+
     @Override
     public void onAnalysis(AnalysisResult result, int frameWidth, int frameHeight) {
+        if (rebindingForRotation) {
+            return;
+        }
         MotionSnapshot motion = motionSnapshot();
         AnalysisResult displayedResult = result;
         if (checks.stability
@@ -406,6 +487,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         if (checks.stability && !motion.stable) {
             return;
         }
+        lockAutoOrientationForCapture();
         capturing = true;
         capturedMotion = null;
         captureMotionSequence = motion.motionSequence;
@@ -598,6 +680,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
                 return;
             }
             capturing = false;
+            unlockAutoOrientationAfterRetry();
             overlayView.update(
                 debugMode ? diagnostic : null,
                 debugMode ? frameWidth : 0,
@@ -703,7 +786,9 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         json.put("recognitionSignals", signals);
         json.put("perspectiveCorrected", true);
         json.put("flashMode", flashMode);
-        json.put("orientation", scanOrientation);
+        json.put("orientation", capturedOrientation == null
+            ? currentOrientation() : capturedOrientation);
+        json.put("orientationMode", scanOrientation);
         json.put("debugMode", debugMode);
         if ("auto".equals(flashMode)) {
             json.put("flashFired", JSONObject.NULL);

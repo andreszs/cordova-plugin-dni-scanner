@@ -72,8 +72,10 @@ public final class DniScannerPlugin extends CordovaPlugin {
             return "La opción flashMode debe ser 'off', 'auto' u 'on'.";
         }
         String orientation = options.optString("orientation", "portrait");
-        if (!("portrait".equals(orientation) || "landscape".equals(orientation))) {
-            return "La opción orientation debe ser 'portrait' o 'landscape'.";
+        if (!("portrait".equals(orientation)
+            || "landscape".equals(orientation)
+            || "auto".equals(orientation))) {
+            return "La opción orientation debe ser 'portrait', 'landscape' o 'auto'.";
         }
         if (!isBooleanOption(options, "showCloseButton")) {
             return "La opción showCloseButton debe ser booleana.";

@@ -33,7 +33,7 @@ function normalizeError(error) {
  *          perspective?: boolean, stability?: boolean, sharpness?: boolean,
  *          brightness?: boolean, glare?: boolean, shadows?: boolean,
  *          edgeOcclusion?: boolean, moire?: boolean, requestedSide?: boolean},
- *          orientation?: ('portrait'|'landscape'), timeoutMs?: number}} options
+ *          orientation?: ('portrait'|'landscape'|'auto'), timeoutMs?: number}} options
  * @returns {Promise<object>} A success result or {status: 'cancelled', reason: 'user'}.
  */
 exports.scan = function scan(options) {

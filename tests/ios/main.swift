@@ -35,6 +35,19 @@ private func stableMachine() -> DNIMotionStabilityMachine {
     return machine
 }
 
+private func syntheticDocumentFrame() -> (width: Int, height: Int, luma: [UInt8]) {
+    let width = 320
+    let height = 240
+    var luma = [UInt8](repeating: 42, count: width * height)
+    for y in 48..<193 {
+        for x in 45..<275 {
+            let border = x < 49 || x >= 271 || y < 52 || y >= 189
+            luma[y * width + x] = border ? 235 : 188
+        }
+    }
+    return (width, height, luma)
+}
+
 private let tests: [(String, () throws -> Void)] = [
     ("fallback without sensors", {
         let machine = DNIMotionStabilityMachine()
@@ -124,6 +137,47 @@ private let tests: [(String, () throws -> Void)] = [
         try expect(Set(dictionary.keys) == expected, "motion schema keys changed")
         try expect(dictionary["gyroscopeRadPerSecond"] as? Double == 0.018, "gyro rounding changed")
         try expect(dictionary["linearAcceleration"] is NSNull, "missing acceleration must be null")
+    }),
+    ("geometric DNI fallback detects four borders", {
+        let frame = syntheticDocumentFrame()
+        let detection = DNIGeometricDocumentDetector().detect(
+            width: frame.width,
+            height: frame.height,
+            luma: frame.luma,
+            permittedRegion: CGRect(x: 0.05, y: 0.05, width: 0.90, height: 0.90),
+            targetAreaFraction: 0.43
+        )
+        try expect(detection != nil, "Sobel/Hough fallback should detect the synthetic card")
+        try expect(abs((detection?.observedAspect ?? 0) - 1.59) < 0.15, "card aspect should be preserved")
+    }),
+    ("geometric DNI fallback honors the visible guide", {
+        let frame = syntheticDocumentFrame()
+        let detection = DNIGeometricDocumentDetector().detect(
+            width: frame.width,
+            height: frame.height,
+            luma: frame.luma,
+            permittedRegion: CGRect(x: 0.25, y: 0.25, width: 0.50, height: 0.50),
+            targetAreaFraction: 0.25
+        )
+        try expect(detection == nil, "a card outside the guide must not be accepted")
+    }),
+    ("automatic orientation is accepted", {
+        let options = try DNIOptions(dictionary: [
+            "side": "front",
+            "orientation": "auto"
+        ])
+        try expect(options.orientation == "auto", "auto orientation should be preserved")
+    }),
+    ("capture orientation remains locked until the photo callback", {
+        var state = DNICaptureOrientationState()
+        state.beginCapture(at: .landscapeLeft)
+        state.beginCapture(at: .portrait)
+        try expect(state.locked == .landscapeLeft, "rotation must not replace the capture lock")
+        state.receivePhoto()
+        try expect(state.locked == nil, "photo callback should release autorotation")
+        try expect(state.captured == .landscapeLeft, "accepted result must retain effective orientation")
+        state.discardPhoto()
+        try expect(state.captured == nil, "discarded photo must clear captured orientation")
     })
 ]
 
@@ -142,4 +196,4 @@ if failures > 0 {
     exit(1)
 }
 
-print("PASS: \(tests.count) deterministic iOS motion tests")
+print("PASS: \(tests.count) deterministic iOS tests")

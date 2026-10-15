@@ -105,7 +105,8 @@ final class DniScanner: CDVPlugin {
         options: DNIOptions,
         flashMode: String,
         flashFired: Bool?,
-        motion: DNIMotionSnapshot
+        motion: DNIMotionSnapshot,
+        effectiveOrientation: String
     ) -> [String: Any] {
         let recognition = scan.recognition
         let documentConfidence = Double(scan.detection.score)
@@ -140,7 +141,8 @@ final class DniScanner: CDVPlugin {
             "recognitionSignals": recognition.signals,
             "perspectiveCorrected": true,
             "flashMode": flashMode,
-            "orientation": options.orientation,
+            "orientation": options.orientation == "auto" ? effectiveOrientation : options.orientation,
+            "orientationMode": options.orientation,
             "debugMode": options.debugMode,
             "flashFired": flashFired ?? NSNull(),
             "capturedAt": formatter.string(from: Date())
@@ -257,7 +259,8 @@ extension DniScanner: DNIViewControllerDelegate {
             options: options,
             flashMode: controller.effectiveFlashMode,
             flashFired: flashFired,
-            motion: motion
+            motion: motion,
+            effectiveOrientation: controller.effectiveCaptureOrientation
         )
         controller.dismiss(animated: true) { [weak self] in
             guard let self = self else { return }
