@@ -145,13 +145,17 @@ final class SideVariantRecognizer {
         if (selectedFeatures.localizedLowerRightScore > 0.50f) {
             signals.add("localized_lower_right_dense_region");
         }
+        if (selectedFeatures.contentScore > 0.20f) {
+            signals.add("printed_content");
+        }
         return new RecognitionResult(
             side,
             variant,
             sideConfidence,
             variantConfidence,
             0,
-            Collections.unmodifiableList(signals)
+            Collections.unmodifiableList(signals),
+            selectedFeatures.contentScore
         );
     }
 
@@ -287,6 +291,21 @@ final class SideVariantRecognizer {
         float monochromeRightScore = clamp01(0.55f + rightMiddle
             - rightSaturation * 2.0f);
         float rightDenseScore = clamp01((rightMiddle + edgeGrid[11]) * 0.9f);
+        float edgeMean = average(edgeGrid, 0, edgeGrid.length);
+        int activeCells = 0;
+        for (float value : edgeGrid) {
+            if (value >= 0.055f) {
+                activeCells++;
+            }
+        }
+        float activeCoverage = activeCells / (float) edgeGrid.length;
+        // This intentionally ignores where content appears. It only describes
+        // whether the corrected card contains a useful amount of printed texture.
+        // It is diagnostic metadata and never blocks automatic capture.
+        float contentScore = clamp01(
+            0.68f * clamp01((edgeMean - 0.015f) / 0.16f)
+                + 0.32f * activeCoverage
+        );
 
         return new FeatureVector(
             edgeGrid,
@@ -298,7 +317,8 @@ final class SideVariantRecognizer {
             photoLeftScore,
             photoRightScore,
             monochromeRightScore,
-            rightDenseScore
+            rightDenseScore,
+            contentScore
         );
     }
 
@@ -381,12 +401,13 @@ final class SideVariantRecognizer {
         final float photoRightScore;
         final float monochromeRightScore;
         final float rightDenseScore;
+        final float contentScore;
 
         FeatureVector(float[] edgeGrid, float[] saturationGrid, float mrzScore,
                       float squareRegionScore, float wideRegionScore,
                       float localizedLowerRightScore, float photoLeftScore,
                       float photoRightScore, float monochromeRightScore,
-                      float rightDenseScore) {
+                      float rightDenseScore, float contentScore) {
             this.edgeGrid = edgeGrid;
             this.saturationGrid = saturationGrid;
             this.mrzScore = mrzScore;
@@ -397,6 +418,7 @@ final class SideVariantRecognizer {
             this.photoRightScore = photoRightScore;
             this.monochromeRightScore = monochromeRightScore;
             this.rightDenseScore = rightDenseScore;
+            this.contentScore = contentScore;
         }
     }
 

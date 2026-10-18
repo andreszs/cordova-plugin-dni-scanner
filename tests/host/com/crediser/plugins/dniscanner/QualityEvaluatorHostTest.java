@@ -52,7 +52,7 @@ public final class QualityEvaluatorHostTest {
             evaluator,
             detection,
             withSkinEdgeObstruction(textured(128)),
-            new ScanChecks(true, true, true, true, true, true, true, true, false, false, true),
+            new ScanChecks(true, true, true, true, true, true, true, true, false, false),
             AnalysisResult.State.READY,
             "edge-occlusion-disabled"
         );
@@ -60,7 +60,7 @@ public final class QualityEvaluatorHostTest {
             evaluator,
             detection,
             withUnevenLighting(textured(158)),
-            new ScanChecks(true, true, true, true, true, true, true, false, true, false, true),
+            new ScanChecks(true, true, true, true, true, true, true, false, true, false),
             AnalysisResult.State.READY,
             "shadows-disabled"
         );

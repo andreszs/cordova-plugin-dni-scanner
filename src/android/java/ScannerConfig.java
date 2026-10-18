@@ -72,6 +72,16 @@ final class ScannerConfig {
     final float maxGlareBlobFraction = 0.09f;
     final int glareConfirmationFrames = 3;
 
+    // Permissive diagnostics for downstream OCR. These values do not gate
+    // automatic capture; enabled ScanChecks retain sole control of acceptance.
+    final double minOcrSharpnessVariance = 55.0;
+    final float minOcrBrightness = 35f;
+    final float maxOcrBrightness = 238f;
+    final float maxOcrDarkFraction = 0.50f;
+    final float maxOcrClippedFraction = 0.60f;
+    final float maxOcrGlareFraction = 0.28f;
+    final float maxOcrGlareBlobFraction = 0.18f;
+
     // Uneven illumination is measured from robust background estimates over a
     // normalized card grid. Requiring both a broad tonal spread and a coherent
     // transition avoids treating portraits, barcodes or printed regions as shadows.

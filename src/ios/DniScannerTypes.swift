@@ -35,7 +35,6 @@ struct DNIChecks {
     let shadows: Bool
     let edgeOcclusion: Bool
     let moire: Bool
-    let requestedSide: Bool
 
     static let defaults = DNIChecks(
         documentSize: true,
@@ -47,15 +46,14 @@ struct DNIChecks {
         glare: true,
         shadows: true,
         edgeOcclusion: true,
-        moire: false,
-        requestedSide: true
+        moire: false
     )
 
     init(dictionary: [String: Any]?) throws {
         let source = dictionary ?? [:]
         let known = Set([
             "documentSize", "centering", "perspective", "stability", "sharpness",
-            "brightness", "glare", "shadows", "edgeOcclusion", "moire", "requestedSide"
+            "brightness", "glare", "shadows", "edgeOcclusion", "moire"
         ])
         for (name, value) in source {
             guard known.contains(name) else {
@@ -79,7 +77,6 @@ struct DNIChecks {
         shadows = bool("shadows", true)
         edgeOcclusion = bool("edgeOcclusion", true)
         moire = bool("moire", false)
-        requestedSide = bool("requestedSide", true)
     }
 
     private init(
@@ -92,8 +89,7 @@ struct DNIChecks {
         glare: Bool,
         shadows: Bool,
         edgeOcclusion: Bool,
-        moire: Bool,
-        requestedSide: Bool
+        moire: Bool
     ) {
         self.documentSize = documentSize
         self.centering = centering
@@ -105,7 +101,6 @@ struct DNIChecks {
         self.shadows = shadows
         self.edgeOcclusion = edgeOcclusion
         self.moire = moire
-        self.requestedSide = requestedSide
     }
 
     var dictionary: [String: Any] {
@@ -119,10 +114,15 @@ struct DNIChecks {
             "glare": glare,
             "shadows": shadows,
             "edgeOcclusion": edgeOcclusion,
-            "moire": moire,
-            "requestedSide": requestedSide
+            "moire": moire
         ]
     }
+}
+
+enum DNISideValidationMode: String {
+    case off
+    case advisory
+    case strict
 }
 
 struct DNIOptions {
@@ -130,6 +130,7 @@ struct DNIOptions {
     static let maximumOutputLongEdge = 2048
 
     let side: String
+    let sideValidation: DNISideValidationMode
     let flashMode: String
     let orientation: String
     let showCloseButton: Bool
@@ -144,6 +145,12 @@ struct DNIOptions {
     init(dictionary: [String: Any]) throws {
         guard let side = dictionary["side"] as? String, side == "front" || side == "back" else {
             throw DNIError.invalidArgument("La opción side debe ser 'front' o 'back'.")
+        }
+        let rawSideValidation = dictionary["sideValidation"] as? String ?? "off"
+        guard let sideValidation = DNISideValidationMode(rawValue: rawSideValidation) else {
+            throw DNIError.invalidArgument(
+                "La opción sideValidation debe ser 'off', 'advisory' o 'strict'."
+            )
         }
         if let autoCapture = dictionary["autoCapture"] {
             guard let enabled = autoCapture as? Bool, enabled else {
@@ -211,6 +218,7 @@ struct DNIOptions {
         }
 
         self.side = side
+        self.sideValidation = sideValidation
         self.flashMode = flashMode
         self.orientation = orientation
         self.showCloseButton = try strictBool("showCloseButton", fallback: true)
@@ -378,6 +386,7 @@ struct DNIRecognition {
     let sideConfidence: Double
     let variantConfidence: Double
     let signals: [String]
+    let contentScore: Double
 }
 
 enum DNIAnalysisState: String {

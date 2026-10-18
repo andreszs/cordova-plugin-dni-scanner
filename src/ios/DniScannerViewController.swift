@@ -547,7 +547,8 @@ final class DNIViewController: UIViewController {
             do {
                 let directory = try self.cacheDirectory()
                 let scan = try self.stillProcessor.process(data: data, options: self.options, directory: directory)
-                if self.options.checks.requestedSide && scan.recognition.side != self.options.side {
+                if self.options.sideValidation == .strict
+                    && scan.recognition.side != self.options.side {
                     try? FileManager.default.removeItem(at: scan.fileURL)
                     let requested = self.options.side == "front" ? "frente" : "dorso"
                     let message = scan.recognition.side == "unknown"

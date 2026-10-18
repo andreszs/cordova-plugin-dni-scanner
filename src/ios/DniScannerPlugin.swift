@@ -110,7 +110,20 @@ final class DniScanner: CDVPlugin {
     ) -> [String: Any] {
         let recognition = scan.recognition
         let documentConfidence = Double(scan.detection.score)
-        let overall = min(documentConfidence, max(recognition.sideConfidence, 0.76))
+        let exposeSide = options.sideValidation != .off
+        let detectedSide = exposeSide ? recognition.side : "unknown"
+        let sideConfidence = exposeSide ? recognition.sideConfidence : 0
+        let variantConfidence = exposeSide ? recognition.variantConfidence : 0
+        let detectedVariant: Any = exposeSide
+            ? (recognition.variant.map { $0 as Any } ?? NSNull())
+            : NSNull()
+        let sideMatchesRequested: Any = detectedSide == "unknown"
+            ? NSNull()
+            : detectedSide == options.side
+        let usable = usableForOcr(scan.quality)
+        let signals = recognition.signals.filter {
+            exposeSide || $0 == "printed_content"
+        }
         let attributes = try? FileManager.default.attributesOfItem(atPath: scan.fileURL.path)
         let bytes = (attributes?[.size] as? NSNumber)?.int64Value ?? 0
         let formatter = ISO8601DateFormatter()
@@ -121,13 +134,20 @@ final class DniScanner: CDVPlugin {
             "imageUri": imageWebURL(fileName: scan.fileURL.lastPathComponent),
             "imagePath": scan.fileURL.path,
             "requestedSide": options.side,
-            "detectedSide": recognition.side,
-            "variant": recognition.variant ?? NSNull(),
+            "sideValidation": options.sideValidation.rawValue,
+            "detectedSide": detectedSide,
+            "sideMatchesRequested": sideMatchesRequested,
+            "variant": detectedVariant,
+            "documentCandidate": true,
+            "usableForOcr": usable,
+            "contentScore": round(recognition.contentScore),
+            "qualityWarnings": qualityWarnings(scan.quality),
             "confidence": [
                 "document": round(documentConfidence),
-                "side": round(recognition.sideConfidence),
-                "variant": round(recognition.variantConfidence),
-                "overall": round(overall)
+                "content": round(recognition.contentScore),
+                "side": round(sideConfidence),
+                "variant": round(variantConfidence),
+                "overall": round(documentConfidence)
             ],
             "width": scan.width,
             "height": scan.height,
@@ -138,7 +158,7 @@ final class DniScanner: CDVPlugin {
             "quality": scan.quality.dictionary,
             "motion": motion.dictionary,
             "appliedChecks": options.checks.dictionary,
-            "recognitionSignals": recognition.signals,
+            "recognitionSignals": signals,
             "perspectiveCorrected": true,
             "flashMode": flashMode,
             "orientation": options.orientation == "auto" ? effectiveOrientation : options.orientation,
@@ -147,6 +167,46 @@ final class DniScanner: CDVPlugin {
             "flashFired": flashFired ?? NSNull(),
             "capturedAt": formatter.string(from: Date())
         ]
+    }
+
+    private func usableForOcr(_ quality: DNIQuality) -> Bool {
+        return quality.sharpness >= DNIEngine.minimumOCRSharpness
+            && quality.brightness >= DNIEngine.minimumOCRBrightness
+            && quality.brightness <= DNIEngine.maximumOCRBrightness
+            && quality.darkClipping <= DNIEngine.maximumOCRDarkClipping
+            && quality.highlightClipping <= DNIEngine.maximumOCRHighlightClipping
+            && quality.glare <= DNIEngine.maximumOCRGlare
+    }
+
+    private func qualityWarnings(_ quality: DNIQuality) -> [String] {
+        var warnings: [String] = []
+        if quality.sharpness < DNIEngine.minimumSharpness * 1.35 {
+            warnings.append("low_sharpness")
+        }
+        if quality.brightness < DNIEngine.minimumBrightness + 18
+            || quality.darkClipping > DNIEngine.maximumDarkClipping * 0.75 {
+            warnings.append("low_light")
+        }
+        if quality.brightness > DNIEngine.maximumBrightness - 12
+            || quality.highlightClipping > DNIEngine.maximumHighlightClipping * 0.75 {
+            warnings.append("high_light")
+        }
+        if quality.glare > DNIEngine.maximumGlare * 0.65 {
+            warnings.append("glare")
+        }
+        if quality.illuminationSpread > DNIEngine.maximumIlluminationSpread * 0.75
+            && quality.shadowBoundary > DNIEngine.maximumShadowBoundary * 0.65 {
+            warnings.append("uneven_lighting")
+        }
+        if max(quality.edgeGap, max(quality.edgeObstruction, quality.skinEdgeObstruction))
+            > DNIEngine.maximumEdgeObstruction * 0.75 {
+            warnings.append("edge_obstruction")
+        }
+        if quality.moire > DNIEngine.maximumMoire * 0.75
+            && quality.moireCoverage > DNIEngine.maximumMoireCoverage * 0.75 {
+            warnings.append("screen_moire")
+        }
+        return warnings
     }
 
     private func imageWebURL(fileName: String) -> String {

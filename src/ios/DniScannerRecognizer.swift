@@ -19,6 +19,7 @@ final class DNISideVariantRecognizer {
         let photoRight: Double
         let monochromeRight: Double
         let rightDense: Double
+        let contentScore: Double
     }
 
     private struct Candidate {
@@ -97,7 +98,10 @@ final class DNISideVariantRecognizer {
         let features = makeFeatures(scaled)
         let all = candidates(features).sorted { $0.score > $1.score }
         guard let best = all.first else {
-            return DNIRecognition(side: "unknown", variant: nil, sideConfidence: 0, variantConfidence: 0, signals: [])
+            return DNIRecognition(
+                side: "unknown", variant: nil, sideConfidence: 0,
+                variantConfidence: 0, signals: [], contentScore: 0
+            )
         }
         let otherSide = all.filter { $0.side != best.side }.map(\.score).max() ?? 0
         let otherVariant = all.filter { $0.variant != best.variant }.map(\.score).max() ?? 0
@@ -111,12 +115,14 @@ final class DNISideVariantRecognizer {
         if features.squareRegion > 0.50 { signals.append("square_dense_region") }
         if features.wideRegion > 0.50 { signals.append("wide_dense_region") }
         if features.localizedLowerRight > 0.50 { signals.append("localized_lower_right_dense_region") }
+        if features.contentScore > 0.20 { signals.append("printed_content") }
         return DNIRecognition(
             side: side,
             variant: variant,
             sideConfidence: sideConfidence,
             variantConfidence: variantConfidence,
-            signals: signals
+            signals: signals,
+            contentScore: features.contentScore
         )
     }
 
@@ -201,6 +207,13 @@ final class DNISideVariantRecognizer {
         let leftSaturation = (saturationGrid[0] + saturationGrid[4] + saturationGrid[8]) / 3
         let rightSaturation = (saturationGrid[3] + saturationGrid[7] + saturationGrid[11]) / 3
         let mrz = clamp((bottom - 0.18) / 0.30 + 0.25 * (bottom - middle))
+        let edgeMean = average(edges, 0, edges.count)
+        let activeCoverage = Double(edges.filter { $0 >= 0.055 }.count) / Double(edges.count)
+        // Position-independent printed texture. This is diagnostic metadata only;
+        // it must never reject a geometrically valid, usable capture.
+        let contentScore = clamp(
+            0.68 * clamp((edgeMean - 0.015) / 0.16) + 0.32 * activeCoverage
+        )
         return Features(
             edges: edges,
             saturation: saturationGrid,
@@ -211,7 +224,8 @@ final class DNISideVariantRecognizer {
             photoLeft: clamp(0.45 + leftSaturation * 1.8 + (edges[4] - edges[7]) * 0.6),
             photoRight: clamp(0.45 + rightSaturation * 1.8 + (edges[7] - edges[4]) * 0.6),
             monochromeRight: clamp(0.55 + rightMiddle - rightSaturation * 2.0),
-            rightDense: clamp((rightMiddle + edges[11]) * 0.9)
+            rightDense: clamp((rightMiddle + edges[11]) * 0.9),
+            contentScore: contentScore
         )
     }
 

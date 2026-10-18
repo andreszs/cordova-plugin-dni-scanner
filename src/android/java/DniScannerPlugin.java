@@ -64,6 +64,10 @@ public final class DniScannerPlugin extends CordovaPlugin {
         if (!("front".equals(side) || "back".equals(side))) {
             return "La opción side debe ser 'front' o 'back'.";
         }
+        String sideValidation = options.optString("sideValidation", "off");
+        if (SideValidationMode.fromValue(sideValidation) == null) {
+            return "La opción sideValidation debe ser 'off', 'advisory' o 'strict'.";
+        }
         if (options.has("autoCapture") && !options.optBoolean("autoCapture", true)) {
             return "La versión actual sólo admite autoCapture=true.";
         }
@@ -163,7 +167,6 @@ public final class DniScannerPlugin extends CordovaPlugin {
             case "shadows":
             case "edgeOcclusion":
             case "moire":
-            case "requestedSide":
                 return true;
             default:
                 return false;

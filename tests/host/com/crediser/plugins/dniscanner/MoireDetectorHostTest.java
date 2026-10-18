@@ -36,7 +36,7 @@ public final class MoireDetectorHostTest {
             throw new AssertionError("Moiré must not block with default checks.");
         }
         ScanChecks enabled = new ScanChecks(
-            true, true, true, true, true, true, true, true, true, true, true
+            true, true, true, true, true, true, true, true, true, true
         );
         if (evaluator.classify(detection, quality, enabled)
             != AnalysisResult.State.SCREEN_MOIRE) {

@@ -24,6 +24,7 @@ function normalizeError(error) {
  * Opens the native automatic DNI scanner.
  *
  * @param {{side: ('front'|'back'), autoCapture?: boolean,
+ *          sideValidation?: ('off'|'advisory'|'strict'),
  *          flashMode?: ('off'|'auto'|'on'), showCloseButton?: boolean,
  *          showFlashButton?: boolean, debugMode?: boolean,
  *          maxOutputLongEdge?: number,
@@ -32,7 +33,7 @@ function normalizeError(error) {
  *          checks?: {documentSize?: boolean, centering?: boolean,
  *          perspective?: boolean, stability?: boolean, sharpness?: boolean,
  *          brightness?: boolean, glare?: boolean, shadows?: boolean,
- *          edgeOcclusion?: boolean, moire?: boolean, requestedSide?: boolean},
+ *          edgeOcclusion?: boolean, moire?: boolean},
  *          orientation?: ('portrait'|'landscape'|'auto'), timeoutMs?: number}} options
  * @returns {Promise<object>} A success result or {status: 'cancelled', reason: 'user'}.
  */

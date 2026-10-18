@@ -168,6 +168,35 @@ private let tests: [(String, () throws -> Void)] = [
         ])
         try expect(options.orientation == "auto", "auto orientation should be preserved")
     }),
+    ("side validation defaults to off", {
+        let options = try DNIOptions(dictionary: ["side": "front"])
+        try expect(options.sideValidation == .off, "permissive side validation must be the default")
+    }),
+    ("side validation policies are accepted", {
+        let advisory = try DNIOptions(dictionary: [
+            "side": "front",
+            "sideValidation": "advisory"
+        ])
+        let strict = try DNIOptions(dictionary: [
+            "side": "back",
+            "sideValidation": "strict"
+        ])
+        try expect(advisory.sideValidation == .advisory, "advisory policy should be preserved")
+        try expect(strict.sideValidation == .strict, "strict policy should be preserved")
+    }),
+    ("invalid side validation is rejected", {
+        do {
+            _ = try DNIOptions(dictionary: [
+                "side": "front",
+                "sideValidation": "relaxed"
+            ])
+            throw TestFailure(description: "unknown side policy should fail")
+        } catch is TestFailure {
+            throw TestFailure(description: "unknown side policy was accepted")
+        } catch {
+            // Expected DNIError.invalidArgument.
+        }
+    }),
     ("capture orientation remains locked until the photo callback", {
         var state = DNICaptureOrientationState()
         state.beginCapture(at: .landscapeLeft)

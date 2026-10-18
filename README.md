@@ -100,6 +100,7 @@ The demo supports Android and iOS, exposes every scan option and quality check, 
 ```javascript
 const result = await DniScanner.scan({
     side: "front",
+    sideValidation: "off",
     orientation: "auto",
     flashMode: "off",
     showCloseButton: true,
@@ -112,8 +113,7 @@ const result = await DniScanner.scan({
         glare: true,
         shadows: true,
         edgeOcclusion: true,
-        moire: false,
-        requestedSide: true
+        moire: false
     },
     timeoutMs: 45000
 });
@@ -132,6 +132,7 @@ Use `side: "back"` to capture the back.
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `side` | `"front" \| "back"` | required | Requested DNI side. |
+| `sideValidation` | `"off" \| "advisory" \| "strict"` | `"off"` | Controls side recognition. `off` neither exposes nor enforces the heuristic side result, `advisory` returns the best-effort classification without blocking, and `strict` requires it to match `side`. |
 | `autoCapture` | `boolean` | `true` | Only `true` is currently supported. |
 | `orientation` | `"portrait" \| "landscape" \| "auto"` | `"portrait"` | Scanner orientation for this session. `auto` follows the phone while scanning; capture briefly locks the current orientation. Fixed landscape follows both physical landscape positions on iOS. |
 | `flashMode` | `"off" \| "auto" \| "on"` | `"off"` | Initial flash mode. `on` uses the torch; `off` is recommended to reduce reflections. |
@@ -162,7 +163,6 @@ Only one scan may run at a time.
 | `shadows` | Rejects strong uneven illumination. |
 | `edgeOcclusion` | Rejects interrupted edges and likely fingers/hands. |
 | `moire` | Rejects broad periodic interference consistent with photographing a display. Defaults to `false`; its diagnostic metrics are still returned. |
-| `requestedSide` | Requires `detectedSide` to match `side`. |
 
 Four-corner document detection is always required for cropping and perspective correction. Disabling a check reduces capture guarantees.
 
@@ -176,13 +176,20 @@ A successful scan resolves with metadata and a temporary JPEG:
   "imageUri": "https://localhost/_dni_scanner_image_/dni-....jpg",
   "imagePath": "/data/user/0/.../cache/dni-scanner/dni-....jpg",
   "requestedSide": "front",
-  "detectedSide": "front",
-  "variant": 2,
+  "sideValidation": "off",
+  "detectedSide": "unknown",
+  "sideMatchesRequested": null,
+  "variant": null,
+  "documentCandidate": true,
+  "usableForOcr": true,
+  "contentScore": 0.86,
+  "qualityWarnings": [],
   "confidence": {
     "document": 0.91,
-    "side": 0.78,
-    "variant": 0.72,
-    "overall": 0.78
+    "content": 0.86,
+    "side": 0.0,
+    "variant": 0.0,
+    "overall": 0.91
   },
   "width": 1280,
   "height": 807,
@@ -225,10 +232,9 @@ A successful scan resolves with metadata and a temporary JPEG:
     "glare": true,
     "shadows": true,
     "edgeOcclusion": true,
-    "moire": false,
-    "requestedSide": true
+    "moire": false
   },
-  "recognitionSignals": ["layout_signature"],
+  "recognitionSignals": ["printed_content"],
   "perspectiveCorrected": true,
   "flashMode": "off",
   "orientation": "portrait",
@@ -246,9 +252,15 @@ A successful scan resolves with metadata and a temporary JPEG:
 | `status` | `"success"` for an accepted capture. Cancellation uses the separate result documented below. |
 | `imageUri` | WebView-safe local URL. Use it directly as an `<img>` source. |
 | `imagePath` | Native absolute path to the same private-cache JPEG. |
-| `requestedSide` / `detectedSide` | Requested side and recognized `"front"`, `"back"`, or `"unknown"`. With `requestedSide` checking enabled, a success always matches. |
-| `variant` | Estimated generation (`1`, `2`, `3`, or `null` when confidence is insufficient). |
-| `confidence` | `document`, `side`, `variant`, and conservative `overall` heuristic scores. |
+| `requestedSide` | Side requested by the application and used for scanner instructions. |
+| `sideValidation` | Effective `"off"`, `"advisory"`, or `"strict"` policy. |
+| `detectedSide` / `sideMatchesRequested` | Best-effort side result and comparison. With `off`, they are `"unknown"` and `null`. Only `strict` can reject a mismatch or unknown side. |
+| `variant` | Best-effort generation estimate in `advisory` or `strict`; `null` with `off` or insufficient confidence. It never affects capture quality. |
+| `documentCandidate` | `true` when a card-like quadrilateral was detected, corrected, and returned. It is not an authenticity result. |
+| `usableForOcr` | Whether the final image meets permissive, non-configurable baseline exposure, focus, and severe-glare limits intended for downstream OCR. It does not block capture. |
+| `contentScore` | Position-independent printed-texture score. It is diagnostic and never blocks capture. |
+| `qualityWarnings` | Non-blocking warnings such as `low_sharpness`, `low_light`, `high_light`, `glare`, `uneven_lighting`, `edge_obstruction`, or `screen_moire`. |
+| `confidence` | `document`, `content`, optional `side`/`variant`, and `overall` heuristic scores. |
 | `width` / `height` / `mimeType` / `bytes` | Encoded image properties. |
 | `maxOutputLongEdge` | Effective output-size limit requested for this scan. The actual long edge can be smaller. |
 | `guideMarginPercent` | Effective outward detection margin around the dotted guide. |
@@ -278,7 +290,7 @@ All confidence and quality numbers are rounded to four decimals and are diagnost
 | `moire` | Normalized strength and extent of periodic high-frequency interference; lower is better. It is always reported. |
 | `moireCoverage` | Fraction of evaluated document regions with a strong periodic pattern; lower is better. It is always reported. |
 
-Possible `recognitionSignals` are `layout_signature`, `machine_readable_rows`, `square_dense_region`, `wide_dense_region`, and `localized_lower_right_dense_region`. They are supporting geometric/layout observations, not decoded QR, PDF417, MRZ, or personal data.
+Possible `recognitionSignals` are `printed_content`, `layout_signature`, `machine_readable_rows`, `square_dense_region`, `wide_dense_region`, and `localized_lower_right_dense_region`. With `sideValidation: "off"`, only the position-independent `printed_content` signal is exposed. These are supporting observations, not decoded QR, PDF417, MRZ, or personal data.
 
 Both image locations are temporary. Copy the file to application-managed persistent storage if it must be retained.
 
@@ -303,7 +315,7 @@ Other failures reject with `{ code, message, recoverable }`:
 | `PROCESSING_FAILED` | Non-retryable local failure while decoding, transforming, encoding, writing, or returning the result. |
 | `UNKNOWN` | Unstructured native error normalized by the JavaScript wrapper. |
 
-Quality rejection, unknown-side recognition, or a side mismatch do not produce `PROCESSING_FAILED`. The image is discarded and capture resumes without a retry limit. The session ends on success, cancellation, a non-retryable failure, or `DETECTION_TIMEOUT`. With `timeoutMs: 0`, retryable rejection can continue indefinitely.
+Quality rejection does not produce `PROCESSING_FAILED`; the image is discarded and capture resumes. Side recognition never rejects in `off` or `advisory`. In `strict`, an unknown or mismatched side is also discarded and scanning resumes. The session ends on success, cancellation, a non-retryable failure, or `DETECTION_TIMEOUT`. With `timeoutMs: 0`, retryable rejection can continue indefinitely.
 
 ## Architecture and behavior
 
@@ -313,13 +325,13 @@ Quality rejection, unknown-side recognition, or a side mismatch do not produce `
 - Framing, perspective, stability, focus, exposure, glare, shadows, edge obstruction, and display moiré are checked before capture and rechecked on the photograph.
 - When `checks.stability` is enabled, Android uses the device gyroscope and acceleration sensors while iOS samples rotation and user acceleration through Core Motion at approximately 50 Hz. Movement blocks analysis and the shutter; movement detected during capture discards that photo and resumes scanning. Missing, late, or stale sensors fall back to visual stability instead of blocking capture.
 - Stable valid frames trigger native photo capture; the result is perspective-corrected and saved as JPEG 95 with a configurable maximum long edge (1280 px by default, capped at 2048 px). Colors are preserved without paper-scanner filters.
-- A compact 4×3 edge/saturation layout classifier estimates side and generation. It does not decode QR or PDF417 and does not rotate or recognize an upside-down DNI.
+- A position-independent printed-content score is returned for downstream diagnostics and never blocks capture. In `advisory` or `strict`, a compact 4×3 edge/saturation classifier also estimates side and generation; those estimates remain heuristic and variant never blocks capture.
 
 The native guide changes from red to yellow to green. A subtle gray outline shows the detected quadrilateral, and one message reports the highest-priority problem. Built-in scanner messages are currently in Spanish. `debugMode` adds diagnostic categories for image quality, visual stability, and iOS device movement. Green means accepted, red means rejected, and gray means disabled, unavailable, or not yet sampling.
 
 An iOS landscape session supports both `landscapeLeft` and `landscapeRight`. The preview, analyzed frames, captured photo, overlay, and controls update together when the device is rotated 180 degrees.
 
-With the default `checks.requestedSide: true`, an opposite or unknown side is discarded. An opposite side displays a red warning for three seconds before analysis resumes.
+The default `sideValidation: "off"` prioritizes capture recall: printing offsets, wear, dirt, layout differences, unknown side, and low side/variant confidence do not reject an otherwise usable card image. `advisory` returns the classification without changing acceptance. Only `strict` discards an opposite or unknown side and displays the red correction message before analysis resumes.
 
 ## Dependencies and licenses
 
@@ -343,7 +355,8 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 
 ## Known limitations
 
-- Side and generation recognition are heuristic and based on a limited reference/calibration set; they are not document-authenticity checks.
+- `documentCandidate` and `contentScore` describe card-like geometry and printed texture; they do not prove DNI identity or authenticity. Use downstream OCR or business validation when that distinction is required.
+- Side and generation estimates in `advisory` and `strict` are heuristic and based on a limited reference/calibration set.
 - Glare, shadow, and hand/edge detection are heuristic and may require further device calibration.
 - iOS has been exercised on an iPhone 11, but camera and recognition thresholds still need calibration across additional iPhone generations and representative DNI samples.
 - QR and PDF417 are not decoded. Only automatic capture is supported; there is no manual shutter or Base64 result.
@@ -355,6 +368,13 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 `tests/host` contains deterministic Android tests for geometry, stability, image quality, perspective correction, edge obstruction, and layout classification. `tests/ios` exercises motion fallback, startup, rotation, acceleration, quiet recovery, capture-time movement, and stale samples without Core Motion hardware. The iOS sources are compiled in both simulator and device configurations through the Cordova demo. Reference DNI images are intentionally excluded from the repository and npm package. A physical-device scan remains required before a production release.
 
 ## Changelog
+
+### 0.2.1
+
+- Replaced the former requested-side check with `sideValidation: "off" | "advisory" | "strict"`; the high-recall `off` policy is now the default.
+- Made layout, side, and DNI-generation similarity non-blocking unless strict side validation is explicitly requested. Variant estimation never blocks capture.
+- Added `documentCandidate`, `usableForOcr`, `contentScore`, `qualityWarnings`, `sideMatchesRequested`, and effective side-validation metadata.
+- Added a position-independent printed-content diagnostic so shifted, worn, dirty, or irregularly printed DNI cards are not rejected for missing prototype landmarks.
 
 ### 0.2.0
 

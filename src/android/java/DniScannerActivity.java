@@ -77,6 +77,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     private DetectionRegion detectionRegion;
     private DeviceMotionMonitor motionMonitor;
     private String requestedSide;
+    private SideValidationMode sideValidation;
     private String imageWebBaseUrl;
     private String flashMode;
     private String scanOrientation;
@@ -110,6 +111,12 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         try {
             JSONObject options = new JSONObject(getIntent().getStringExtra(EXTRA_OPTIONS_JSON));
             requestedSide = options.getString("side");
+            sideValidation = SideValidationMode.fromValue(
+                options.optString("sideValidation", "off")
+            );
+            if (sideValidation == null) {
+                throw new IllegalArgumentException("Invalid side validation mode");
+            }
             config = ScannerConfig.forSession(
                 options.optInt("maxOutputLongEdge", ScannerConfig.DEFAULT_MAX_OUTPUT_LONG_EDGE),
                 (float) options.optDouble(
@@ -566,7 +573,8 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             );
             StillImageProcessor.Result result = processor.process(rawFile, finalFile);
             RecognitionResult recognition = result.recognition;
-            if (checks.requestedSide && !recognition.matchesRequestedSide(requestedSide)) {
+            if (sideValidation == SideValidationMode.STRICT
+                && !recognition.matchesRequestedSide(requestedSide)) {
                 finalFile.delete();
                 boolean frontRequested = "front".equals(requestedSide);
                 String requestedLabel = frontRequested ? "frente" : "dorso";
@@ -716,13 +724,18 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     private JSONObject buildResult(StillImageProcessor.Result result) throws JSONException {
         RecognitionResult recognition = result.recognition;
         QualityMetrics quality = result.quality;
+        boolean exposeSide = sideValidation != SideValidationMode.OFF;
+        String detectedSide = exposeSide ? recognition.side : "unknown";
+        Integer detectedVariant = exposeSide ? recognition.variant : null;
+        float sideConfidence = exposeSide ? recognition.sideConfidence : 0f;
+        float variantConfidence = exposeSide ? recognition.variantConfidence : 0f;
+        boolean usableForOcr = usableForOcr(quality);
         JSONObject confidence = new JSONObject();
         confidence.put("document", round(result.detection.score));
-        confidence.put("side", round(recognition.sideConfidence));
-        confidence.put("variant", round(recognition.variantConfidence));
-        float overall = Math.min(result.detection.score,
-            Math.max(recognition.sideConfidence, config.minimumSideConfidence));
-        confidence.put("overall", round(overall));
+        confidence.put("content", round(recognition.contentScore));
+        confidence.put("side", round(sideConfidence));
+        confidence.put("variant", round(variantConfidence));
+        confidence.put("overall", round(result.detection.score));
 
         JSONObject qualityJson = new JSONObject();
         qualityJson.put("sharpness", round(sharpnessScore(quality.sharpness)));
@@ -760,8 +773,11 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
 
         JSONArray signals = new JSONArray();
         for (String signal : recognition.signals) {
-            signals.put(signal);
+            if (exposeSide || "printed_content".equals(signal)) {
+                signals.put(signal);
+            }
         }
+        JSONArray warnings = qualityWarnings(quality);
 
         JSONObject json = new JSONObject();
         json.put("status", "success");
@@ -771,8 +787,15 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         json.put("imageUri", imageUri);
         json.put("imagePath", result.file.getAbsolutePath());
         json.put("requestedSide", requestedSide);
-        json.put("detectedSide", recognition.side);
-        json.put("variant", recognition.variant == null ? JSONObject.NULL : recognition.variant);
+        json.put("sideValidation", sideValidation.value);
+        json.put("detectedSide", detectedSide);
+        json.put("sideMatchesRequested", "unknown".equals(detectedSide)
+            ? JSONObject.NULL : requestedSide.equals(detectedSide));
+        json.put("variant", detectedVariant == null ? JSONObject.NULL : detectedVariant);
+        json.put("documentCandidate", true);
+        json.put("usableForOcr", usableForOcr);
+        json.put("contentScore", round(recognition.contentScore));
+        json.put("qualityWarnings", warnings);
         json.put("confidence", confidence);
         json.put("width", result.width);
         json.put("height", result.height);
@@ -811,8 +834,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             source.optBoolean("glare", true),
             source.optBoolean("shadows", true),
             source.optBoolean("edgeOcclusion", true),
-            source.optBoolean("moire", false),
-            source.optBoolean("requestedSide", true)
+            source.optBoolean("moire", false)
         );
     }
 
@@ -828,8 +850,50 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         json.put("shadows", checks.shadows);
         json.put("edgeOcclusion", checks.edgeOcclusion);
         json.put("moire", checks.moire);
-        json.put("requestedSide", checks.requestedSide);
         return json;
+    }
+
+    private boolean usableForOcr(QualityMetrics quality) {
+        return quality.sharpness >= config.minOcrSharpnessVariance
+            && quality.brightness >= config.minOcrBrightness
+            && quality.brightness <= config.maxOcrBrightness
+            && quality.darkFraction <= config.maxOcrDarkFraction
+            && quality.clippedFraction <= config.maxOcrClippedFraction
+            && quality.glareFraction <= config.maxOcrGlareFraction
+            && quality.glareBlobFraction <= config.maxOcrGlareBlobFraction;
+    }
+
+    private JSONArray qualityWarnings(QualityMetrics quality) {
+        JSONArray warnings = new JSONArray();
+        if (quality.sharpness < config.minSharpnessVariance * 1.35) {
+            warnings.put("low_sharpness");
+        }
+        if (quality.brightness < config.minBrightness + 18f
+            || quality.darkFraction > config.maxDarkFraction * 0.75f) {
+            warnings.put("low_light");
+        }
+        if (quality.brightness > config.maxBrightness - 12f
+            || quality.clippedFraction > config.maxClippedFraction * 0.75f) {
+            warnings.put("high_light");
+        }
+        if (quality.glareFraction > config.maxGlareFraction * 0.65f
+            || quality.glareBlobFraction > config.maxGlareBlobFraction * 0.65f) {
+            warnings.put("glare");
+        }
+        if (quality.illuminationSpread > config.maxIlluminationSpread * 0.75f
+            && quality.shadowBoundary > config.maxShadowBoundary * 0.65f) {
+            warnings.put("uneven_lighting");
+        }
+        if (quality.edgeGapFraction > config.maxEdgeGapFraction * 0.75f
+            || quality.warmEdgeRunFraction > config.maxWarmEdgeRunFraction * 0.75f
+            || quality.skinEdgeRunFraction > config.maxStillSkinEdgeRunFraction * 0.75f) {
+            warnings.put("edge_obstruction");
+        }
+        if (quality.moireScore > config.maxMoireScore * 0.75f
+            && quality.moireCoverage > config.maxMoireCoverage * 0.75f) {
+            warnings.put("screen_moire");
+        }
+        return warnings;
     }
 
     private void cycleFlashMode() {

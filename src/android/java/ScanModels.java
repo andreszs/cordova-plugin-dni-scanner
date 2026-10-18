@@ -340,12 +340,11 @@ final class ScanChecks {
     final boolean shadows;
     final boolean edgeOcclusion;
     final boolean moire;
-    final boolean requestedSide;
 
     ScanChecks(boolean documentSize, boolean centering, boolean perspective,
                boolean stability, boolean sharpness, boolean brightness,
                boolean glare, boolean shadows, boolean edgeOcclusion,
-               boolean moire, boolean requestedSide) {
+               boolean moire) {
         this.documentSize = documentSize;
         this.centering = centering;
         this.perspective = perspective;
@@ -356,11 +355,31 @@ final class ScanChecks {
         this.shadows = shadows;
         this.edgeOcclusion = edgeOcclusion;
         this.moire = moire;
-        this.requestedSide = requestedSide;
     }
 
     static ScanChecks defaults() {
-        return new ScanChecks(true, true, true, true, true, true, true, true, true, false, true);
+        return new ScanChecks(true, true, true, true, true, true, true, true, true, false);
+    }
+}
+
+enum SideValidationMode {
+    OFF("off"),
+    ADVISORY("advisory"),
+    STRICT("strict");
+
+    final String value;
+
+    SideValidationMode(String value) {
+        this.value = value;
+    }
+
+    static SideValidationMode fromValue(String value) {
+        for (SideValidationMode mode : values()) {
+            if (mode.value.equals(value)) {
+                return mode;
+            }
+        }
+        return null;
     }
 }
 
@@ -429,15 +448,18 @@ final class RecognitionResult {
     final float variantConfidence;
     final int rotationDegrees;
     final List<String> signals;
+    final float contentScore;
 
     RecognitionResult(String side, Integer variant, float sideConfidence,
-                      float variantConfidence, int rotationDegrees, List<String> signals) {
+                      float variantConfidence, int rotationDegrees, List<String> signals,
+                      float contentScore) {
         this.side = side;
         this.variant = variant;
         this.sideConfidence = sideConfidence;
         this.variantConfidence = variantConfidence;
         this.rotationDegrees = rotationDegrees;
         this.signals = signals;
+        this.contentScore = contentScore;
     }
 
     boolean matchesRequestedSide(String requestedSide) {

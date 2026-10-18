@@ -209,6 +209,13 @@ final class DNIEngine {
     static let maximumMoire = 0.20
     static let maximumMoireCoverage = 0.18
     static let minimumSharpness = 70.0
+    // Permissive diagnostics for downstream OCR. They do not gate capture.
+    static let minimumOCRSharpness = 55.0
+    static let minimumOCRBrightness = 35.0
+    static let maximumOCRBrightness = 238.0
+    static let maximumOCRDarkClipping = 0.50
+    static let maximumOCRHighlightClipping = 0.60
+    static let maximumOCRGlare = 0.28
     static let requiredStableFrames = 3
     static let requiredStableDurationMs = 550
     private let imageFactory = DNIImageFactory.shared
@@ -677,8 +684,7 @@ final class DNIStillProcessor {
             // perimeter has no outside background to compare. Occlusion was already
             // evaluated on the uncropped photograph above.
             "edgeOcclusion": false,
-            "moire": checks.moire,
-            "requestedSide": checks.requestedSide
+            "moire": checks.moire
         ])
     }
 }

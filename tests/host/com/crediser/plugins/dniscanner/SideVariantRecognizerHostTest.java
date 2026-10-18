@@ -14,6 +14,7 @@ public final class SideVariantRecognizerHostTest {
     }
 
     public static void main(String[] args) throws Exception {
+        assertSideValidationModes();
         assertRequestedSideGate();
         SideVariantRecognizer recognizer = new SideVariantRecognizer(ScannerConfig.DEFAULT);
         assertAuditedV2FrontSignature(recognizer);
@@ -44,6 +45,15 @@ public final class SideVariantRecognizerHostTest {
         }
     }
 
+    private static void assertSideValidationModes() {
+        if (SideValidationMode.fromValue("off") != SideValidationMode.OFF
+            || SideValidationMode.fromValue("advisory") != SideValidationMode.ADVISORY
+            || SideValidationMode.fromValue("strict") != SideValidationMode.STRICT
+            || SideValidationMode.fromValue("other") != null) {
+            throw new AssertionError("Side-validation modes changed");
+        }
+    }
+
     private static void assertRequestedSideGate() {
         RecognitionResult front = recognition("front");
         RecognitionResult back = recognition("back");
@@ -57,7 +67,7 @@ public final class SideVariantRecognizerHostTest {
 
     private static RecognitionResult recognition(String side) {
         return new RecognitionResult(
-            side, null, 0.9f, 0f, 0, java.util.Collections.emptyList()
+            side, null, 0.9f, 0f, 0, java.util.Collections.emptyList(), 0.5f
         );
     }
 
@@ -122,7 +132,7 @@ public final class SideVariantRecognizerHostTest {
         java.lang.reflect.Constructor<?> constructor = featureClass.getDeclaredConstructor(
             float[].class, float[].class,
             float.class, float.class, float.class, float.class,
-            float.class, float.class, float.class, float.class
+            float.class, float.class, float.class, float.class, float.class
         );
         constructor.setAccessible(true);
         Object normal = featureVector(constructor, edge, saturation);
@@ -205,9 +215,10 @@ public final class SideVariantRecognizerHostTest {
             + (edge[7] - edge[4]) * .6f);
         float monochromeRight = clamp01(.55f + rightMiddle - rightSaturation * 2f);
         float rightDense = clamp01((rightMiddle + edge[11]) * .9f);
+        float content = clamp01(average(edge, 0, edge.length) / .16f);
         return constructor.newInstance(
             edge, saturation, mrz, square, wide, localized, photoLeft,
-            photoRight, monochromeRight, rightDense
+            photoRight, monochromeRight, rightDense, content
         );
     }
 
