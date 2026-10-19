@@ -30,16 +30,22 @@ Android and iOS Cordova plugin for automatic capture of the front or back of an 
 
 ## Screenshots
 
-The following screenshots are from the companion [`com.andreszs.dniscanner.demo`](https://github.com/andreszs/cordova-plugin-demos/tree/main/com.andreszs.dniscanner.demo) application.
+The following images show the companion [`com.andreszs.dniscanner.demo`](https://github.com/andreszs/cordova-plugin-demos/tree/main/com.andreszs.dniscanner.demo) application, its configuration and quality controls, native automatic capture, and the corrected result.
 
 <table>
   <tr>
-    <td align="center"><img src="docs/screenshots/demo-quality-controls.png" width="320" alt="Demo quality controls"><br><sub>Configurable quality controls</sub></td>
-    <td align="center"><img src="docs/screenshots/native-auto-capture.png" width="320" alt="Native automatic capture"><br><sub>Native automatic capture</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/screenshots/demo-success-result.png" width="320" alt="Successful scan result"><br><sub>Corrected image and recognition result</sub></td>
-    <td align="center"><img src="docs/screenshots/demo-result-metadata.png" width="320" alt="Result metadata"><br><sub>Result metadata</sub></td>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/demo-configuration.gif" width="260" alt="DNI Scanner demo configuration and quality controls"><br>
+      <sub>Configuration and quality controls</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/native-auto-capture.png" width="260" alt="Native DNI automatic capture with accepted quality metrics"><br>
+      <sub>Native automatic capture</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/screenshots/demo-success-result.png" width="260" alt="Corrected DNI image returned to the demo application"><br>
+      <sub>Corrected result</sub>
+    </td>
   </tr>
 </table>
 
@@ -381,7 +387,7 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 
 ## Changelog
 
-### Unreleased
+### 0.2.1
 
 - Added `profile: "genericCard"` with `side: "any"` for credit/debit cards, driver's licenses, and other ID-1-style cards. It preserves geometry and capture-quality checks while skipping DNI layout recognition and color-based hand heuristics.
 - Reduced the full geometry hold to 500 ms and the inertial-sensor quiet window to 300 ms while retaining three-frame confirmation and capture-time motion rejection.
@@ -390,9 +396,6 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 - Added outward still-image edge refinement and fixed safety padding on Android to prefer extra background over clipped DNI content.
 - Made four-side crop integrity mandatory on Android and replaced uniform clamping with independent per-edge expansion.
 - Rechecked corrected-image exposure and clipping when the brightness control is enabled.
-
-### 0.2.1
-
 - Replaced the former requested-side check with `sideValidation: "off" | "advisory" | "strict"`; the high-recall `off` policy is now the default.
 - Made layout, side, and DNI-generation similarity non-blocking unless strict side validation is explicitly requested. Variant estimation never blocks capture.
 - Added `documentCandidate`, `usableForOcr`, `contentScore`, `qualityWarnings`, `sideMatchesRequested`, and effective side-validation metadata.
