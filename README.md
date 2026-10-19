@@ -7,7 +7,7 @@ Android and iOS Cordova plugin for automatic capture of the front or back of an 
 > [!TIP]
 > **Want to try it first?** The [`cordova-plugin-demos`](https://github.com/andreszs/cordova-plugin-demos) repository includes a [ready-to-build Android and iOS DNI Scanner demo](https://github.com/andreszs/cordova-plugin-demos/tree/main/com.andreszs.dniscanner.demo) with every capture option and quality check exposed in the UI.
 
-> Status: functional implementation under active calibration. Android has been exercised on Samsung J7, Samsung S7, and Xiaomi devices. The iOS camera flow, dynamic landscape rotation, guide-aligned analysis, and debug overlay have been exercised on a physical iPhone 11 with Cordova iOS 8.1. Recognition and quality thresholds still require validation with a representative DNI and device matrix before production use on either platform.
+> Status: functional implementation under active calibration. Recognition and quality thresholds should be validated with a representative DNI and device matrix before production use.
 
 ## Table of contents
 
@@ -63,7 +63,7 @@ The plugin supports `cordova-android` 11 through 15 from one codebase. It select
 
 Unknown Android toolchain combinations fail at build time rather than silently selecting an unsafe dependency version.
 
-The iOS implementation supports `cordova-ios` 8.x, iOS 13 or newer, and Swift 5 language mode. The reference build uses `cordova-ios` 8.1 and has been deployed to an iPhone 11. It uses only Apple system frameworks, including AVFoundation, Core Motion, Core Image, Vision, UIKit, and WebKit.
+The iOS implementation supports `cordova-ios` 8.x, iOS 13 or newer, and Swift 5 language mode. It uses only Apple system frameworks, including AVFoundation, Core Motion, Core Image, Vision, UIKit, and WebKit.
 
 ## Installation
 
@@ -376,7 +376,7 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 - `documentCandidate` and `contentScore` describe card-like geometry and printed texture; they do not prove DNI identity or authenticity. Use downstream OCR or business validation when that distinction is required.
 - Side and generation estimates in `advisory` and `strict` are heuristic and based on a limited reference/calibration set.
 - Glare, shadow, and hand/edge detection are heuristic and may require further device calibration.
-- iOS has been exercised on an iPhone 11, but camera and recognition thresholds still need calibration across additional iPhone generations and representative DNI samples.
+- Camera and recognition thresholds may require additional calibration across representative devices and DNI samples.
 - QR and PDF417 are not decoded. Only automatic capture is supported; there is no manual shutter or Base64 result.
 - Fixed portrait or landscape mode keeps that orientation family for the scan; `auto` follows the device between portrait and landscape. An upside-down document inside the guide is not recognized or automatically corrected.
 - Output is temporary cache data and has no plugin-managed retention policy.
