@@ -29,11 +29,12 @@ function normalizeError(error) {
  *          showFlashButton?: boolean, debugMode?: boolean,
  *          maxOutputLongEdge?: number,
  *          guideMarginPercent?: number,
+ *          cropPaddingPercent?: number,
  *          instructionText?: string,
  *          checks?: {documentSize?: boolean, centering?: boolean,
  *          perspective?: boolean, stability?: boolean, sharpness?: boolean,
  *          brightness?: boolean, glare?: boolean, shadows?: boolean,
- *          edgeOcclusion?: boolean, moire?: boolean},
+ *          edgeOcclusion?: boolean},
  *          orientation?: ('portrait'|'landscape'|'auto'), timeoutMs?: number}} options
  * @returns {Promise<object>} A success result or {status: 'cancelled', reason: 'user'}.
  */

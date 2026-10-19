@@ -138,6 +138,129 @@ final class DocumentDetector {
         return best != null && best.score >= config.minDetectionScore ? best : null;
     }
 
+    /**
+     * Refines a still-image quadrilateral toward plausible enclosing edges.
+     * Strong printed rules inside a DNI can otherwise be mistaken for the
+     * physical card boundary. Refinement is deliberately outward-only.
+     */
+    DocumentDetection refineOutwardEdges(LumaFrame frame, DocumentDetection original) {
+        if (original == null || original.quad == null) {
+            return original;
+        }
+        GradientField gradients = computeGradients(frame);
+        if (gradients.edgeThreshold <= 0) {
+            return original;
+        }
+
+        PointF[] points = {
+            original.quad.topLeft,
+            original.quad.topRight,
+            original.quad.bottomRight,
+            original.quad.bottomLeft
+        };
+        float averageWidth = (original.quad.topWidth() + original.quad.bottomWidth()) * 0.5f;
+        float averageHeight = (original.quad.leftHeight() + original.quad.rightHeight()) * 0.5f;
+        int maximumOffset = Math.max(3, Math.round(
+            Math.min(averageWidth, averageHeight) * config.outwardEdgeSearchFraction
+        ));
+        ShiftedEdge[] edges = new ShiftedEdge[4];
+        boolean changed = false;
+        for (int side = 0; side < 4; side++) {
+            PointF start = points[side];
+            PointF end = points[(side + 1) % 4];
+            float dx = end.x - start.x;
+            float dy = end.y - start.y;
+            float length = (float) Math.hypot(dx, dy);
+            if (length < 1f) {
+                return original;
+            }
+            // DocumentQuad points are clockwise in Android screen coordinates.
+            float outwardX = dy / length;
+            float outwardY = -dx / length;
+            float baseline = edgeSupport(
+                start,
+                end,
+                gradients,
+                frame.width,
+                frame.height
+            );
+            float minimumSupport = Math.max(
+                config.minimumOutwardEdgeSupport,
+                baseline * config.minimumRelativeOutwardEdgeSupport
+            );
+            int bestOffset = 0;
+            float bestUtility = baseline;
+            for (int offset = 3; offset <= maximumOffset; offset++) {
+                PointF shiftedStart = shift(start, outwardX, outwardY, offset);
+                PointF shiftedEnd = shift(end, outwardX, outwardY, offset);
+                if (!pointInsideFrame(shiftedStart, frame.width, frame.height)
+                    || !pointInsideFrame(shiftedEnd, frame.width, frame.height)) {
+                    break;
+                }
+                float support = edgeSupport(
+                    shiftedStart,
+                    shiftedEnd,
+                    gradients,
+                    frame.width,
+                    frame.height
+                );
+                if (support < minimumSupport) {
+                    continue;
+                }
+                float utility = support
+                    + config.outwardEdgeDistanceBonus * offset / (float) maximumOffset;
+                if (utility > bestUtility + 0.015f) {
+                    bestUtility = utility;
+                    bestOffset = offset;
+                }
+            }
+            changed |= bestOffset > 0;
+            edges[side] = new ShiftedEdge(
+                shift(start, outwardX, outwardY, bestOffset),
+                shift(end, outwardX, outwardY, bestOffset)
+            );
+        }
+        if (!changed) {
+            return original;
+        }
+
+        PointF topLeft = intersection(edges[3], edges[0]);
+        PointF topRight = intersection(edges[0], edges[1]);
+        PointF bottomRight = intersection(edges[1], edges[2]);
+        PointF bottomLeft = intersection(edges[2], edges[3]);
+        if (topLeft == null || topRight == null || bottomRight == null || bottomLeft == null) {
+            return original;
+        }
+        DocumentQuad refined = new DocumentQuad(topLeft, topRight, bottomRight, bottomLeft);
+        if (!isConvex(refined)
+            || !isInsideWithMargin(refined, frame.width, frame.height, 0f)
+            || (detectionRegion != null
+                && !detectionRegion.contains(refined, frame.width, frame.height))) {
+            return original;
+        }
+        float areaFraction = refined.area() / (frame.width * (float) frame.height);
+        float refinedWidth = (refined.topWidth() + refined.bottomWidth()) * 0.5f;
+        float refinedHeight = (refined.leftHeight() + refined.rightHeight()) * 0.5f;
+        if (refinedHeight < 1f) {
+            return original;
+        }
+        float aspect = refinedWidth / refinedHeight;
+        if (aspect < config.minObservedAspect || aspect > config.maxObservedAspect) {
+            return original;
+        }
+        PointF center = refined.center();
+        float centerX = (center.x - frame.width * 0.5f) / (frame.width * 0.5f);
+        float centerY = (center.y - frame.height * 0.5f) / (frame.height * 0.5f);
+        float centerOffset = (float) Math.hypot(centerX, centerY);
+        return new DocumentDetection(
+            refined,
+            original.score,
+            areaFraction,
+            centerOffset,
+            aspect
+        );
+    }
+
     private GradientField computeGradients(LumaFrame frame) {
         int count = frame.width * frame.height;
         short[] magnitudes = new short[count];
@@ -277,34 +400,70 @@ final class DocumentDetector {
 
     private float edgeSupport(DocumentQuad quad, GradientField gradients, int width, int height) {
         PointF[] points = { quad.topLeft, quad.topRight, quad.bottomRight, quad.bottomLeft };
-        int supported = 0;
-        int total = 0;
+        float support = 0f;
         for (int side = 0; side < 4; side++) {
-            PointF start = points[side];
-            PointF end = points[(side + 1) % 4];
-            int samples = Math.max(20, Math.min(100, (int) DocumentQuad.distance(start, end) / 3));
-            for (int sample = 0; sample <= samples; sample++) {
-                float fraction = sample / (float) samples;
-                int x = Math.round(start.x + (end.x - start.x) * fraction);
-                int y = Math.round(start.y + (end.y - start.y) * fraction);
-                int localMaximum = 0;
-                for (int offsetY = -2; offsetY <= 2; offsetY++) {
-                    for (int offsetX = -2; offsetX <= 2; offsetX++) {
-                        int px = x + offsetX;
-                        int py = y + offsetY;
-                        if (px > 0 && px < width - 1 && py > 0 && py < height - 1) {
-                            localMaximum = Math.max(localMaximum,
-                                gradients.magnitudes[py * width + px] & 0xffff);
-                        }
+            support += edgeSupport(
+                points[side],
+                points[(side + 1) % 4],
+                gradients,
+                width,
+                height
+            );
+        }
+        return support / 4f;
+    }
+
+    private float edgeSupport(PointF start, PointF end, GradientField gradients,
+                              int width, int height) {
+        int supported = 0;
+        int samples = Math.max(20, Math.min(100, (int) DocumentQuad.distance(start, end) / 3));
+        for (int sample = 0; sample <= samples; sample++) {
+            float fraction = sample / (float) samples;
+            int x = Math.round(start.x + (end.x - start.x) * fraction);
+            int y = Math.round(start.y + (end.y - start.y) * fraction);
+            int localMaximum = 0;
+            for (int offsetY = -2; offsetY <= 2; offsetY++) {
+                for (int offsetX = -2; offsetX <= 2; offsetX++) {
+                    int px = x + offsetX;
+                    int py = y + offsetY;
+                    if (px > 0 && px < width - 1 && py > 0 && py < height - 1) {
+                        localMaximum = Math.max(localMaximum,
+                            gradients.magnitudes[py * width + px] & 0xffff);
                     }
                 }
-                if (localMaximum >= gradients.edgeThreshold) {
-                    supported++;
-                }
-                total++;
+            }
+            if (localMaximum >= gradients.edgeThreshold) {
+                supported++;
             }
         }
-        return total == 0 ? 0f : supported / (float) total;
+        return supported / (float) (samples + 1);
+    }
+
+    private PointF shift(PointF point, float x, float y, float distance) {
+        return new PointF(point.x + x * distance, point.y + y * distance);
+    }
+
+    private boolean pointInsideFrame(PointF point, int width, int height) {
+        return point.x >= 1f && point.y >= 1f
+            && point.x <= width - 2f && point.y <= height - 2f;
+    }
+
+    private PointF intersection(ShiftedEdge first, ShiftedEdge second) {
+        float firstX = first.end.x - first.start.x;
+        float firstY = first.end.y - first.start.y;
+        float secondX = second.end.x - second.start.x;
+        float secondY = second.end.y - second.start.y;
+        float determinant = firstX * secondY - firstY * secondX;
+        if (Math.abs(determinant) < 1e-5f) {
+            return null;
+        }
+        float offsetX = second.start.x - first.start.x;
+        float offsetY = second.start.y - first.start.y;
+        float parameter = (offsetX * secondY - offsetY * secondX) / determinant;
+        return new PointF(
+            first.start.x + parameter * firstX,
+            first.start.y + parameter * firstY
+        );
     }
 
     private boolean isInsideWithMargin(DocumentQuad quad, int width, int height, float marginFraction) {
@@ -394,6 +553,16 @@ final class DocumentDetector {
             double y = Math.sin(first.theta * 2) + Math.sin(second.theta * 2);
             double value = Math.atan2(y, x) * 0.5;
             return value < 0 ? value + Math.PI : value;
+        }
+    }
+
+    private static final class ShiftedEdge {
+        final PointF start;
+        final PointF end;
+
+        ShiftedEdge(PointF start, PointF end) {
+            this.start = start;
+            this.end = end;
         }
     }
 }

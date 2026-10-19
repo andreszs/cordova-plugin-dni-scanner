@@ -16,6 +16,9 @@ public final class PerspectiveTransformerHostTest {
         if (ScannerConfig.DEFAULT.maxOutputLongEdge != 1280) {
             throw new AssertionError("The default maximum output long edge must be 1280 px");
         }
+        if (ScannerConfig.DEFAULT.cropPaddingPercent != 3f) {
+            throw new AssertionError("The default crop safety padding must be 3 percent");
+        }
 
         int width = 1100;
         int height = 760;
@@ -44,8 +47,11 @@ public final class PerspectiveTransformerHostTest {
             new PointF(885f, 665f),
             new PointF(175f, 610f)
         );
-        Bitmap corrected = new PerspectiveTransformer(ScannerConfig.DEFAULT)
-            .transform(new Bitmap(source), quad);
+        PerspectiveTransformer transformer = new PerspectiveTransformer(ScannerConfig.DEFAULT);
+        if (!transformer.hasSufficientSourceMargin(quad, width, height)) {
+            throw new AssertionError("A well-contained document must pass crop-integrity validation");
+        }
+        Bitmap corrected = transformer.transform(new Bitmap(source), quad);
         float aspect = corrected.getWidth() / (float) corrected.getHeight();
         System.out.printf("TRANSFORMED width=%d height=%d aspect=%.4f%n",
             corrected.getWidth(), corrected.getHeight(), aspect);
@@ -56,6 +62,47 @@ public final class PerspectiveTransformerHostTest {
         int center = corrected.getPixel(corrected.getWidth() / 2, corrected.getHeight() / 2);
         if (((center >> 16) & 0xff) < 100) {
             throw new AssertionError("The corrected card center was not sampled from the card");
+        }
+        int paddedCorner = corrected.getPixel(2, 2);
+        if (((paddedCorner >> 16) & 0xff) > 80) {
+            throw new AssertionError("The corrected image did not preserve outward safety padding");
+        }
+
+        DocumentQuad axisAligned = new DocumentQuad(
+            new PointF(100f, 80f),
+            new PointF(900f, 80f),
+            new PointF(900f, 580f),
+            new PointF(100f, 580f)
+        );
+        DocumentQuad independentlyExpanded = transformer.expandedQuad(
+            axisAligned,
+            ScannerConfig.DEFAULT.cropPaddingFraction,
+            1000,
+            700,
+            0f
+        );
+        if (independentlyExpanded == null
+            || independentlyExpanded.topLeft.x >= axisAligned.topLeft.x
+            || independentlyExpanded.topLeft.y >= axisAligned.topLeft.y
+            || independentlyExpanded.bottomRight.x <= axisAligned.bottomRight.x
+            || independentlyExpanded.bottomRight.y <= axisAligned.bottomRight.y) {
+            throw new AssertionError("Every document side must expand independently");
+        }
+
+        DocumentQuad clippedTop = new DocumentQuad(
+            new PointF(100f, 8f),
+            new PointF(900f, 8f),
+            new PointF(900f, 508f),
+            new PointF(100f, 508f)
+        );
+        if (transformer.hasSufficientSourceMargin(clippedTop, 1000, 700)) {
+            throw new AssertionError("A document too close to the source boundary must be retried");
+        }
+        try {
+            transformer.transform(new Bitmap(source), clippedTop);
+            throw new AssertionError("Transform must not silently clamp incomplete crop padding");
+        } catch (IllegalArgumentException expected) {
+            // Expected: the scanner must retry instead of returning a clipped DNI.
         }
 
         ScannerConfig compactConfig = ScannerConfig.withMaxOutputLongEdge(768);

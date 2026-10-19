@@ -8,6 +8,11 @@ public final class StabilityTrackerHostTest {
     }
 
     public static void main(String[] args) {
+        verifiesFullStabilityGate();
+        verifiesMandatoryGeometryConfirmation();
+    }
+
+    private static void verifiesFullStabilityGate() {
         StabilityTracker tracker = new StabilityTracker(ScannerConfig.DEFAULT);
         AnalysisResult result = null;
         for (int frame = 0; frame < 7; frame++) {
@@ -23,6 +28,22 @@ public final class StabilityTrackerHostTest {
         AnalysisResult moved = tracker.apply(readyResult(1800L, 55f), 640, 960);
         if (moved.state != AnalysisResult.State.HOLD_STILL || moved.stableFrameCount != 1) {
             throw new AssertionError("Large movement did not reset stability");
+        }
+    }
+
+    private static void verifiesMandatoryGeometryConfirmation() {
+        StabilityTracker tracker = new StabilityTracker(ScannerConfig.DEFAULT);
+        AnalysisResult first = tracker.apply(readyResult(2000L, 0f), 640, 960, false);
+        if (first.state != AnalysisResult.State.HOLD_STILL) {
+            throw new AssertionError("A single quadrilateral must never trigger capture");
+        }
+        AnalysisResult second = tracker.apply(readyResult(2120L, 0.4f), 640, 960, false);
+        if (second.state != AnalysisResult.State.HOLD_STILL) {
+            throw new AssertionError("Geometry confirmation completed too early");
+        }
+        AnalysisResult confirmed = tracker.apply(readyResult(2240L, -0.3f), 640, 960, false);
+        if (confirmed.state != AnalysisResult.State.READY) {
+            throw new AssertionError("Stable geometry was not confirmed with motion checks off");
         }
     }
 

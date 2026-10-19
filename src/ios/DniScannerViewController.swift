@@ -713,7 +713,6 @@ final class DNIViewController: UIViewController {
         case .avoidGlare: return "Evitá reflejos sobre el DNI"
         case .unevenLighting: return "Evitá sombras sobre el DNI"
         case .edgeOccluded: return "No tapes los bordes con los dedos"
-        case .screenMoire: return "Mostrá el DNI físico, no una pantalla"
         case .holdStill: return "Mantené el celular quieto"
         case .waitingForFocus: return "Esperando enfoque"
         case .ready: return "Listo"

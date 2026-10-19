@@ -206,8 +206,6 @@ final class DNIEngine {
     static let maximumIlluminationSpread = 0.31
     static let maximumShadowBoundary = 0.08
     static let maximumEdgeObstruction = 0.28
-    static let maximumMoire = 0.20
-    static let maximumMoireCoverage = 0.18
     static let minimumSharpness = 70.0
     // Permissive diagnostics for downstream OCR. They do not gate capture.
     static let minimumOCRSharpness = 55.0
@@ -217,7 +215,7 @@ final class DNIEngine {
     static let maximumOCRHighlightClipping = 0.60
     static let maximumOCRGlare = 0.28
     static let requiredStableFrames = 3
-    static let requiredStableDurationMs = 550
+    static let requiredStableDurationMs = 500
     private let imageFactory = DNIImageFactory.shared
     private let geometricDetector = DNIGeometricDocumentDetector()
 
@@ -240,7 +238,7 @@ final class DNIEngine {
                 imageHeight: raster.height
             )
         }
-        let quality = evaluate(raster: raster, quad: detection.quad, includeMoire: checks.moire)
+        let quality = evaluate(raster: raster, quad: detection.quad)
         let state = classify(detection: detection, quality: quality, checks: checks)
         return DNIAnalysis(
             state: state,
@@ -345,7 +343,7 @@ final class DNIEngine {
         )
     }
 
-    func evaluate(raster: DNIRaster, quad: DNIQuad, includeMoire: Bool) -> DNIQuality {
+    func evaluate(raster: DNIRaster, quad: DNIQuad) -> DNIQuality {
         let bounds = boundingRect(for: quad, width: raster.width, height: raster.height)
         var count = 0
         var sum = 0.0
@@ -389,7 +387,6 @@ final class DNIEngine {
         let sharpness = max(0, laplacianSquaredSum / Double(max(1, laplacianCount)) - meanLap * meanLap)
         let illumination = illuminationMetrics(raster: raster, quad: quad)
         let edges = edgeMetrics(raster: raster, quad: quad)
-        let moire = includeMoire ? moireMetrics(raster: raster, bounds: bounds) : (0.0, 0.0)
         return DNIQuality(
             sharpness: sharpness,
             brightness: sum / Double(safeCount),
@@ -401,9 +398,7 @@ final class DNIEngine {
             edgeObstruction: edges.warm,
             skinEdgeObstruction: edges.skin,
             illuminationSpread: illumination.spread,
-            shadowBoundary: illumination.boundary,
-            moire: moire.0,
-            moireCoverage: moire.1
+            shadowBoundary: illumination.boundary
         )
     }
 
@@ -424,9 +419,6 @@ final class DNIEngine {
         }
         if checks.edgeOcclusion && max(quality.edgeGap, max(quality.edgeObstruction, quality.skinEdgeObstruction)) > Self.maximumEdgeObstruction {
             return .edgeOccluded
-        }
-        if checks.moire && (quality.moire > Self.maximumMoire || quality.moireCoverage > Self.maximumMoireCoverage) {
-            return .screenMoire
         }
         if checks.sharpness && quality.sharpness < Self.minimumSharpness { return .waitingForFocus }
         return .ready
@@ -561,36 +553,6 @@ final class DNIEngine {
         return min(1, Double(longest) / Double(divisor))
     }
 
-    private func moireMetrics(raster: DNIRaster, bounds: CGRect) -> (Double, Double) {
-        let left = Int(bounds.minX)
-        let right = Int(bounds.maxX)
-        let top = Int(bounds.minY)
-        let bottom = Int(bounds.maxY)
-        guard right - left > 30, bottom - top > 20 else { return (0, 0) }
-        var best = 0.0
-        for lag in 2...10 {
-            var product = 0.0
-            var firstSquare = 0.0
-            var secondSquare = 0.0
-            var count = 0
-            for y in stride(from: top, to: bottom, by: 4) {
-                for x in stride(from: left + lag, to: right, by: 3) {
-                    let first = Double(raster.lumaAt(x: x, y: y) - raster.lumaAt(x: x - 1, y: y))
-                    let second = Double(raster.lumaAt(x: x - lag, y: y) - raster.lumaAt(x: x - lag - 1, y: y))
-                    product += first * second
-                    firstSquare += first * first
-                    secondSquare += second * second
-                    count += 1
-                }
-            }
-            if count > 0 && firstSquare > 1 && secondSquare > 1 {
-                best = max(best, product / sqrt(firstSquare * secondSquare))
-            }
-        }
-        let score = max(0, min(1, (best - 0.40) / 0.60))
-        return (score, score > 0.12 ? min(1, score * 0.7) : 0)
-    }
-
     private func bilinearPoint(quad: DNIQuad, u: CGFloat, v: CGFloat) -> CGPoint {
         let top = CGPoint(
             x: quad.topLeft.x + (quad.topRight.x - quad.topLeft.x) * u,
@@ -619,7 +581,7 @@ final class DNIStillProcessor {
         ) else {
             throw DNIError.retry("No se pudieron confirmar los cuatro bordes en la fotografía.", .searching)
         }
-        let preQuality = engine.evaluate(raster: source, quad: detection.quad, includeMoire: options.checks.moire)
+        let preQuality = engine.evaluate(raster: source, quad: detection.quad)
         let preState = engine.classify(detection: detection, quality: preQuality, checks: options.checks)
         if preState != .ready && preState != .moveCloser && preState != .moveAway && preState != .centerDocument {
             throw DNIError.retry("La fotografía final no alcanzó la calidad mínima.", preState)
@@ -641,7 +603,7 @@ final class DNIStillProcessor {
             bottomRight: CGPoint(x: corrected.width - 1, y: corrected.height - 1),
             bottomLeft: CGPoint(x: 0, y: corrected.height - 1)
         )
-        let quality = engine.evaluate(raster: corrected, quad: outputQuad, includeMoire: options.checks.moire)
+        let quality = engine.evaluate(raster: corrected, quad: outputQuad)
         let outputDetection = DNIDetection(
             quad: outputQuad,
             score: detection.score,
@@ -683,8 +645,7 @@ final class DNIStillProcessor {
             // The corrected image intentionally fills the output canvas, so its
             // perimeter has no outside background to compare. Occlusion was already
             // evaluated on the uncropped photograph above.
-            "edgeOcclusion": false,
-            "moire": checks.moire
+            "edgeOcclusion": false
         ])
     }
 }

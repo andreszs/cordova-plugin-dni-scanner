@@ -267,9 +267,6 @@ final class QualityMetrics {
     final float illuminationSpread;
     final float shadowBoundary;
     final float skinEdgeRunFraction;
-    final float moireScore;
-    final float moireCoverage;
-
     QualityMetrics(double sharpness, float brightness, float darkFraction,
                    float clippedFraction, float glareFraction, float glareBlobFraction,
                    float perspectiveScore) {
@@ -301,17 +298,6 @@ final class QualityMetrics {
                    float perspectiveScore, float edgeGapFraction,
                    float warmEdgeRunFraction, float illuminationSpread,
                    float shadowBoundary, float skinEdgeRunFraction) {
-        this(sharpness, brightness, darkFraction, clippedFraction, glareFraction,
-            glareBlobFraction, perspectiveScore, edgeGapFraction, warmEdgeRunFraction,
-            illuminationSpread, shadowBoundary, skinEdgeRunFraction, 0f, 0f);
-    }
-
-    QualityMetrics(double sharpness, float brightness, float darkFraction,
-                   float clippedFraction, float glareFraction, float glareBlobFraction,
-                   float perspectiveScore, float edgeGapFraction,
-                   float warmEdgeRunFraction, float illuminationSpread,
-                   float shadowBoundary, float skinEdgeRunFraction,
-                   float moireScore, float moireCoverage) {
         this.sharpness = sharpness;
         this.brightness = brightness;
         this.darkFraction = darkFraction;
@@ -324,8 +310,6 @@ final class QualityMetrics {
         this.illuminationSpread = illuminationSpread;
         this.shadowBoundary = shadowBoundary;
         this.skinEdgeRunFraction = skinEdgeRunFraction;
-        this.moireScore = moireScore;
-        this.moireCoverage = moireCoverage;
     }
 }
 
@@ -339,12 +323,10 @@ final class ScanChecks {
     final boolean glare;
     final boolean shadows;
     final boolean edgeOcclusion;
-    final boolean moire;
 
     ScanChecks(boolean documentSize, boolean centering, boolean perspective,
                boolean stability, boolean sharpness, boolean brightness,
-               boolean glare, boolean shadows, boolean edgeOcclusion,
-               boolean moire) {
+               boolean glare, boolean shadows, boolean edgeOcclusion) {
         this.documentSize = documentSize;
         this.centering = centering;
         this.perspective = perspective;
@@ -354,11 +336,10 @@ final class ScanChecks {
         this.glare = glare;
         this.shadows = shadows;
         this.edgeOcclusion = edgeOcclusion;
-        this.moire = moire;
     }
 
     static ScanChecks defaults() {
-        return new ScanChecks(true, true, true, true, true, true, true, true, true, false);
+        return new ScanChecks(true, true, true, true, true, true, true, true, true);
     }
 }
 
@@ -400,7 +381,7 @@ final class AnalysisResult {
         AVOID_GLARE,
         UNEVEN_LIGHTING,
         EDGE_OCCLUDED,
-        SCREEN_MOIRE,
+        CROP_INCOMPLETE,
         HOLD_STILL,
         WAITING_FOR_FOCUS,
         READY,

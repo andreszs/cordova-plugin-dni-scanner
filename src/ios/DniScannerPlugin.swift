@@ -202,10 +202,6 @@ final class DniScanner: CDVPlugin {
             > DNIEngine.maximumEdgeObstruction * 0.75 {
             warnings.append("edge_obstruction")
         }
-        if quality.moire > DNIEngine.maximumMoire * 0.75
-            && quality.moireCoverage > DNIEngine.maximumMoireCoverage * 0.75 {
-            warnings.append("screen_moire")
-        }
         return warnings
     }
 

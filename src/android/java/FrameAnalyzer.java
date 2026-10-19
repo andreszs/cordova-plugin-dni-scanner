@@ -18,6 +18,7 @@ final class FrameAnalyzer implements ImageAnalysis.Analyzer {
     private final ScanChecks checks;
     private final DocumentDetector detector;
     private final QualityEvaluator qualityEvaluator;
+    private final PerspectiveTransformer cropGeometry;
     private final StabilityTracker stabilityTracker;
     private final EdgeOcclusionTracker edgeOcclusionTracker;
     private final GlareTracker glareTracker;
@@ -32,6 +33,7 @@ final class FrameAnalyzer implements ImageAnalysis.Analyzer {
         this.listener = listener;
         this.detector = new DocumentDetector(config, detectionRegion);
         this.qualityEvaluator = new QualityEvaluator(config);
+        this.cropGeometry = new PerspectiveTransformer(config);
         this.stabilityTracker = new StabilityTracker(config);
         this.edgeOcclusionTracker = new EdgeOcclusionTracker(config);
         this.glareTracker = new GlareTracker(config);
@@ -63,20 +65,25 @@ final class FrameAnalyzer implements ImageAnalysis.Analyzer {
                 );
             } else {
                 frame = LumaExtractor.withColorFromImageProxy(image, frame);
-                QualityMetrics quality = qualityEvaluator.evaluate(
-                    frame,
+                QualityMetrics quality = qualityEvaluator.evaluate(frame, detection.quad);
+                boolean cropComplete = cropGeometry.hasSufficientSourceMargin(
                     detection.quad,
-                    checks.moire
+                    frame.width,
+                    frame.height
                 );
                 AnalysisResult.State state = qualityEvaluator.classify(detection, quality, checks);
                 state = edgeOcclusionTracker.apply(state);
                 state = glareTracker.apply(state);
+                if (state == AnalysisResult.State.READY && !cropComplete) {
+                    state = AnalysisResult.State.CROP_INCOMPLETE;
+                }
                 boolean geometryValid = (!checks.documentSize
                     || (detection.areaFraction >= config.minDocumentArea
                         && detection.areaFraction <= config.maxDocumentArea))
                     && (!checks.centering || detection.centerOffset <= config.maxCenterOffset)
                     && (!checks.perspective
-                        || quality.perspectiveScore >= config.minPerspectiveScore);
+                        || quality.perspectiveScore >= config.minPerspectiveScore)
+                    && cropComplete;
                 boolean qualityValid = (!checks.sharpness
                     || quality.sharpness >= config.minSharpnessVariance)
                     && (!checks.brightness
@@ -88,8 +95,7 @@ final class FrameAnalyzer implements ImageAnalysis.Analyzer {
                         || (quality.glareFraction <= config.maxGlareFraction
                             && quality.glareBlobFraction <= config.maxGlareBlobFraction))
                     && (!checks.shadows || !qualityEvaluator.hasUnevenLighting(quality))
-                    && (!checks.edgeOcclusion || !qualityEvaluator.hasEdgeOcclusion(quality))
-                    && (!checks.moire || !qualityEvaluator.hasMoire(quality));
+                    && (!checks.edgeOcclusion || !qualityEvaluator.hasEdgeOcclusion(quality));
                 result = new AnalysisResult(
                     state,
                     detection,
@@ -98,11 +104,14 @@ final class FrameAnalyzer implements ImageAnalysis.Analyzer {
                     qualityValid,
                     now
                 );
-                if (checks.stability) {
-                    result = stabilityTracker.apply(result, frame.width, frame.height);
-                } else {
-                    stabilityTracker.reset();
-                }
+                // Geometric confirmation is always required. The stability
+                // option only selects the longer hold and device-motion gate.
+                result = stabilityTracker.apply(
+                    result,
+                    frame.width,
+                    frame.height,
+                    checks.stability
+                );
             }
             listener.onAnalysis(result, frame.width, frame.height);
         } catch (Throwable error) {

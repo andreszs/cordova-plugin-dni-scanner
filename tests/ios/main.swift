@@ -87,7 +87,7 @@ private let tests: [(String, () throws -> Void)] = [
         ))
         try expect(!machine.snapshot(at: 0.74).stable, "acceleration spike must reject")
     }),
-    ("recovery after 700 ms quiet", {
+    ("recovery after 300 ms quiet", {
         let machine = stableMachine()
         machine.add(DNIMotionSample(
             timestamp: 0.74,
@@ -97,7 +97,7 @@ private let tests: [(String, () throws -> Void)] = [
         addQuietSamples(to: machine, from: 0.76, through: 1.80)
         let recovered = machine.snapshot(at: 1.80)
         try expect(recovered.stable, "device should recover after the quiet window")
-        try expect(recovered.quietDurationMs >= 700, "quiet duration should reach 700 ms")
+        try expect(recovered.quietDurationMs >= 300, "quiet duration should reach 300 ms")
     }),
     ("movement during capture", {
         let machine = stableMachine()

@@ -94,11 +94,24 @@ final class StillImageProcessor {
                     "No se pudieron confirmar los cuatro bordes en la fotografía."
                 );
             }
+            detection = detector.refineOutwardEdges(stillFrame, detection);
             QualityMetrics preTransformQuality = qualityEvaluator.evaluate(
                 stillFrame,
-                detection.quad,
-                checks.moire
+                detection.quad
             );
+            if (!transformer.hasSufficientSourceMargin(
+                    detection.quad,
+                    stillFrame.width,
+                    stillFrame.height)) {
+                throw new RetryableProcessingException(
+                    "No se pudo conservar completo el contorno del DNI.",
+                    AnalysisResult.State.CROP_INCOMPLETE,
+                    detection,
+                    preTransformQuality,
+                    stillFrame.width,
+                    stillFrame.height
+                );
+            }
             AnalysisResult.State qualityState = qualityEvaluator.classify(
                 detection,
                 preTransformQuality,
@@ -114,7 +127,6 @@ final class StillImageProcessor {
                 || qualityState == AnalysisResult.State.AVOID_GLARE
                 || qualityState == AnalysisResult.State.UNEVEN_LIGHTING
                 || qualityState == AnalysisResult.State.EDGE_OCCLUDED
-                || qualityState == AnalysisResult.State.SCREEN_MOIRE
                 || qualityState == AnalysisResult.State.ADJUST_PERSPECTIVE) {
                 throw new RetryableProcessingException(
                     "La fotografía final no alcanzó la calidad mínima: " + qualityState.name(),
@@ -138,26 +150,35 @@ final class StillImageProcessor {
                 new android.graphics.PointF(0f, outputFrame.height - 1f)
             );
             QualityMetrics outputQuality = qualityEvaluator.evaluate(outputFrame, outputQuad);
+            boolean outputTooDark = checks.brightness
+                && (outputQuality.brightness < config.minBrightness
+                    || outputQuality.darkFraction > config.maxDarkFraction);
+            boolean outputTooBright = checks.brightness
+                && (outputQuality.brightness > config.maxBrightness
+                    || outputQuality.clippedFraction > config.maxClippedFraction);
             if ((checks.sharpness
                     && outputQuality.sharpness < config.minSharpnessVariance)
+                || outputTooDark
+                || outputTooBright
                 || (checks.glare
                     && (outputQuality.glareFraction > config.maxGlareFraction
                         || outputQuality.glareBlobFraction > config.maxGlareBlobFraction))
                 || (checks.shadows && qualityEvaluator.hasUnevenLighting(outputQuality))
                 || (checks.edgeOcclusion
-                    && qualityEvaluator.hasStillEdgeOcclusion(outputQuality))
-                || (checks.moire && qualityEvaluator.hasMoire(outputQuality))) {
+                    && qualityEvaluator.hasStillEdgeOcclusion(outputQuality))) {
                 AnalysisResult.State outputState;
                 if (checks.edgeOcclusion
                     && qualityEvaluator.hasStillEdgeOcclusion(outputQuality)) {
                     outputState = AnalysisResult.State.EDGE_OCCLUDED;
-                } else if (checks.moire && qualityEvaluator.hasMoire(outputQuality)) {
-                    outputState = AnalysisResult.State.SCREEN_MOIRE;
                 } else if (checks.shadows && qualityEvaluator.hasUnevenLighting(outputQuality)) {
                     outputState = AnalysisResult.State.UNEVEN_LIGHTING;
                 } else if (checks.sharpness
                     && outputQuality.sharpness < config.minSharpnessVariance) {
                     outputState = AnalysisResult.State.WAITING_FOR_FOCUS;
+                } else if (outputTooDark) {
+                    outputState = AnalysisResult.State.IMPROVE_LIGHTING;
+                } else if (outputTooBright) {
+                    outputState = AnalysisResult.State.REDUCE_LIGHTING;
                 } else {
                     outputState = AnalysisResult.State.AVOID_GLARE;
                 }

@@ -117,6 +117,19 @@ public final class DniScannerPlugin extends CordovaPlugin {
                 return "La opción guideMarginPercent debe estar entre 0 y 20.";
             }
         }
+        if (options.has("cropPaddingPercent")) {
+            Object rawPadding = options.opt("cropPaddingPercent");
+            if (!(rawPadding instanceof Number)) {
+                return "La opción cropPaddingPercent debe ser numérica.";
+            }
+            double padding = ((Number) rawPadding).doubleValue();
+            if (Double.isNaN(padding)
+                || Double.isInfinite(padding)
+                || padding < ScannerConfig.MIN_CROP_PADDING_PERCENT
+                || padding > ScannerConfig.MAX_CROP_PADDING_PERCENT) {
+                return "La opción cropPaddingPercent debe estar entre 0 y 10.";
+            }
+        }
         if (options.has("instructionText")
             && !options.isNull("instructionText")
             && !(options.opt("instructionText") instanceof String)) {
@@ -166,7 +179,6 @@ public final class DniScannerPlugin extends CordovaPlugin {
             case "glare":
             case "shadows":
             case "edgeOcclusion":
-            case "moire":
                 return true;
             default:
                 return false;

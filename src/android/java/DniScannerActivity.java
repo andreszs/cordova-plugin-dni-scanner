@@ -30,6 +30,7 @@ import androidx.camera.core.ImageCaptureException;
 import androidx.camera.core.Preview;
 import androidx.camera.core.UseCaseGroup;
 import androidx.camera.core.ViewPort;
+import androidx.camera.core.ZoomState;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
@@ -90,6 +91,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     private boolean capturing;
     private boolean completed;
     private boolean rebindingForRotation;
+    private int cameraBindGeneration;
     private Runnable timeoutRunnable;
     private AnalysisResult latestAnalysis;
     private int latestFrameWidth;
@@ -122,6 +124,10 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
                 (float) options.optDouble(
                     "guideMarginPercent",
                     ScannerConfig.DEFAULT_GUIDE_MARGIN_PERCENT
+                ),
+                (float) options.optDouble(
+                    "cropPaddingPercent",
+                    ScannerConfig.DEFAULT_CROP_PADDING_PERCENT
                 )
             );
             flashMode = options.optString("flashMode", "off");
@@ -202,6 +208,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     @Override
     protected void onDestroy() {
         completed = true;
+        cameraBindGeneration++;
         if (timeoutRunnable != null) {
             mainHandler.removeCallbacks(timeoutRunnable);
         }
@@ -319,11 +326,67 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
                     finishWithError("CAMERA_UNAVAILABLE", "No hay una cámara trasera disponible.", false);
                     return;
                 }
-                bindCameraUseCases();
+                scheduleCameraBindAfterLayout();
             } catch (Exception error) {
                 finishWithError("CAMERA_UNAVAILABLE", "No se pudo abrir la cámara.", true);
             }
         }, ContextCompat.getMainExecutor(this));
+    }
+
+    private void scheduleCameraBindAfterLayout() {
+        int generation = ++cameraBindGeneration;
+        waitForStablePreviewLayout(generation, 0, 0, 0, 0);
+    }
+
+    private void waitForStablePreviewLayout(
+        int generation,
+        int previousWidth,
+        int previousHeight,
+        int stablePasses,
+        int attempts
+    ) {
+        if (generation != cameraBindGeneration
+            || completed
+            || isFinishing()
+            || capturing
+            || cameraProvider == null) {
+            return;
+        }
+
+        int width = previewView.getWidth();
+        int height = previewView.getHeight();
+        boolean sameSize = width == previousWidth && height == previousHeight;
+        int nextStablePasses = sameSize ? stablePasses + 1 : 0;
+        boolean landscape = getResources().getConfiguration().orientation
+            == Configuration.ORIENTATION_LANDSCAPE;
+        boolean orientationReady = landscape ? width >= height : height >= width;
+        boolean viewPortReady = previewView.getViewPort() != null;
+
+        if (width > 0
+            && height > 0
+            && orientationReady
+            && viewPortReady
+            && nextStablePasses >= 1) {
+            bindCameraUseCases();
+            return;
+        }
+
+        if (attempts >= 30) {
+            if (width > 0 && height > 0 && viewPortReady) {
+                bindCameraUseCases();
+            } else {
+                finishWithError("CAMERA_UNAVAILABLE", "No se pudo preparar la vista de cámara.", true);
+            }
+            return;
+        }
+
+        previewView.postOnAnimation(() -> waitForStablePreviewLayout(
+            generation,
+            width,
+            height,
+            nextStablePasses,
+            attempts + 1
+        ));
     }
 
     private void bindCameraUseCases() {
@@ -347,6 +410,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             .build();
         detectionRegion = overlayView.detectionRegion(config.guideMarginFraction);
         frameAnalyzer = new FrameAnalyzer(config, checks, detectionRegion, this);
+        frameAnalyzer.setEnabled(false);
         imageAnalysis.setAnalyzer(analysisExecutor, frameAnalyzer);
 
         // Legacy devices can spend several extra seconds on CameraX's quality
@@ -382,10 +446,64 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
                 flashMode = "off";
             }
             applyFlashMode();
-            rebindingForRotation = false;
+            normalizeZoomAndEnableAnalysis(camera, frameAnalyzer, 0);
         } catch (Exception error) {
             finishWithError("CAMERA_UNAVAILABLE", "No se pudo configurar la cámara.", true);
         }
+    }
+
+    private void normalizeZoomAndEnableAnalysis(
+        @NonNull Camera boundCamera,
+        @NonNull FrameAnalyzer boundAnalyzer,
+        int attempt
+    ) {
+        ZoomState zoomState = boundCamera.getCameraInfo().getZoomState().getValue();
+        float targetZoom = 1.0f;
+        if (zoomState != null) {
+            targetZoom = Math.max(
+                zoomState.getMinZoomRatio(),
+                Math.min(zoomState.getMaxZoomRatio(), targetZoom)
+            );
+        }
+
+        final float requestedZoom = targetZoom;
+        final ListenableFuture<Void> zoomFuture;
+        try {
+            zoomFuture = boundCamera.getCameraControl().setZoomRatio(requestedZoom);
+        } catch (RuntimeException error) {
+            enableAnalysisAfterZoomReset(boundCamera, boundAnalyzer);
+            return;
+        }
+
+        zoomFuture.addListener(() -> {
+            if (completed
+                || camera != boundCamera
+                || frameAnalyzer != boundAnalyzer) {
+                return;
+            }
+
+            ZoomState appliedState = boundCamera.getCameraInfo().getZoomState().getValue();
+            if (attempt == 0
+                && appliedState != null
+                && Math.abs(appliedState.getZoomRatio() - requestedZoom) > 0.01f) {
+                normalizeZoomAndEnableAnalysis(boundCamera, boundAnalyzer, 1);
+                return;
+            }
+            enableAnalysisAfterZoomReset(boundCamera, boundAnalyzer);
+        }, ContextCompat.getMainExecutor(this));
+    }
+
+    private void enableAnalysisAfterZoomReset(
+        @NonNull Camera boundCamera,
+        @NonNull FrameAnalyzer boundAnalyzer
+    ) {
+        if (completed
+            || camera != boundCamera
+            || frameAnalyzer != boundAnalyzer) {
+            return;
+        }
+        boundAnalyzer.setEnabled(true);
+        rebindingForRotation = false;
     }
 
     private void rebindCameraAfterRotation() {
@@ -405,12 +523,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         imageCapture = null;
         camera = null;
         overlayView.update(null, 0, 0, "Girando cámara…", Color.WHITE);
-        overlayView.post(() -> {
-            if (completed || isFinishing() || capturing || cameraProvider == null) {
-                return;
-            }
-            bindCameraUseCases();
-        });
+        scheduleCameraBindAfterLayout();
     }
 
     private int currentDisplayRotation() {
@@ -593,7 +706,8 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             mainHandler.post(() -> finishWithSuccess(json));
         } catch (StillImageProcessor.RetryableProcessingException retryable) {
             finalFile.delete();
-            if (retryable.state == AnalysisResult.State.EDGE_OCCLUDED) {
+            if (retryable.state == AnalysisResult.State.EDGE_OCCLUDED
+                || retryable.state == AnalysisResult.State.CROP_INCOMPLETE) {
                 retryAfterInvalidStill(
                     statusText(retryable.state),
                     config.occlusionMessageDurationMs,
@@ -749,8 +863,6 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         qualityJson.put("illuminationSpread", round(quality.illuminationSpread));
         qualityJson.put("shadowBoundary", round(quality.shadowBoundary));
         qualityJson.put("skinEdgeObstruction", round(quality.skinEdgeRunFraction));
-        qualityJson.put("moire", round(quality.moireScore));
-        qualityJson.put("moireCoverage", round(quality.moireCoverage));
 
         MotionSnapshot motion = capturedMotion == null ? motionSnapshot() : capturedMotion;
         JSONObject motionJson = new JSONObject();
@@ -801,6 +913,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         json.put("height", result.height);
         json.put("maxOutputLongEdge", config.maxOutputLongEdge);
         json.put("guideMarginPercent", round(config.guideMarginPercent));
+        json.put("cropPaddingPercent", round(config.cropPaddingPercent));
         json.put("mimeType", "image/jpeg");
         json.put("bytes", result.file.length());
         json.put("quality", qualityJson);
@@ -833,8 +946,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             source.optBoolean("brightness", true),
             source.optBoolean("glare", true),
             source.optBoolean("shadows", true),
-            source.optBoolean("edgeOcclusion", true),
-            source.optBoolean("moire", false)
+            source.optBoolean("edgeOcclusion", true)
         );
     }
 
@@ -849,7 +961,6 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         json.put("glare", checks.glare);
         json.put("shadows", checks.shadows);
         json.put("edgeOcclusion", checks.edgeOcclusion);
-        json.put("moire", checks.moire);
         return json;
     }
 
@@ -888,10 +999,6 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             || quality.warmEdgeRunFraction > config.maxWarmEdgeRunFraction * 0.75f
             || quality.skinEdgeRunFraction > config.maxStillSkinEdgeRunFraction * 0.75f) {
             warnings.put("edge_obstruction");
-        }
-        if (quality.moireScore > config.maxMoireScore * 0.75f
-            && quality.moireCoverage > config.maxMoireCoverage * 0.75f) {
-            warnings.put("screen_moire");
         }
         return warnings;
     }
@@ -961,8 +1068,8 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
                 return "Evitá sombras sobre el DNI";
             case EDGE_OCCLUDED:
                 return "\u26A0 Apoyá el DNI y no tapes los bordes";
-            case SCREEN_MOIRE:
-                return "\u26A0 Evitá fotografiar el DNI desde una pantalla";
+            case CROP_INCOMPLETE:
+                return "\u26A0 Dejá visible todo el borde del DNI";
             case HOLD_STILL:
                 return "Mantené esta posición";
             case WAITING_FOR_FOCUS:
@@ -978,7 +1085,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
 
     private int statusColor(AnalysisResult.State state) {
         return state == AnalysisResult.State.EDGE_OCCLUDED
-            || state == AnalysisResult.State.SCREEN_MOIRE
+            || state == AnalysisResult.State.CROP_INCOMPLETE
             ? 0xffff5c5c : Color.WHITE;
     }
 

@@ -14,6 +14,11 @@ final class StabilityTracker {
     }
 
     AnalysisResult apply(AnalysisResult current, int frameWidth, int frameHeight) {
+        return apply(current, frameWidth, frameHeight, true);
+    }
+
+    AnalysisResult apply(AnalysisResult current, int frameWidth, int frameHeight,
+                         boolean requireFullStability) {
         if (!current.isReadyCandidate() || current.detection == null) {
             reset();
             return current;
@@ -39,7 +44,11 @@ final class StabilityTracker {
         previousArea = current.detection.quad.area();
 
         long duration = Math.max(0L, now - stableSinceMs);
-        boolean ready = stableFrames >= config.stableFrames && duration >= config.stableDurationMs;
+        int requiredFrames = requireFullStability
+            ? config.stableFrames : config.geometryConfirmationFrames;
+        long requiredDuration = requireFullStability
+            ? config.stableDurationMs : config.geometryConfirmationDurationMs;
+        boolean ready = stableFrames >= requiredFrames && duration >= requiredDuration;
         AnalysisResult result = new AnalysisResult(
             ready ? AnalysisResult.State.READY : AnalysisResult.State.HOLD_STILL,
             current.detection,

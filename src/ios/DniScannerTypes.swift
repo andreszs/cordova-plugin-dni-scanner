@@ -34,7 +34,6 @@ struct DNIChecks {
     let glare: Bool
     let shadows: Bool
     let edgeOcclusion: Bool
-    let moire: Bool
 
     static let defaults = DNIChecks(
         documentSize: true,
@@ -45,15 +44,14 @@ struct DNIChecks {
         brightness: true,
         glare: true,
         shadows: true,
-        edgeOcclusion: true,
-        moire: false
+        edgeOcclusion: true
     )
 
     init(dictionary: [String: Any]?) throws {
         let source = dictionary ?? [:]
         let known = Set([
             "documentSize", "centering", "perspective", "stability", "sharpness",
-            "brightness", "glare", "shadows", "edgeOcclusion", "moire"
+            "brightness", "glare", "shadows", "edgeOcclusion"
         ])
         for (name, value) in source {
             guard known.contains(name) else {
@@ -76,7 +74,6 @@ struct DNIChecks {
         glare = bool("glare", true)
         shadows = bool("shadows", true)
         edgeOcclusion = bool("edgeOcclusion", true)
-        moire = bool("moire", false)
     }
 
     private init(
@@ -88,8 +85,7 @@ struct DNIChecks {
         brightness: Bool,
         glare: Bool,
         shadows: Bool,
-        edgeOcclusion: Bool,
-        moire: Bool
+        edgeOcclusion: Bool
     ) {
         self.documentSize = documentSize
         self.centering = centering
@@ -100,7 +96,6 @@ struct DNIChecks {
         self.glare = glare
         self.shadows = shadows
         self.edgeOcclusion = edgeOcclusion
-        self.moire = moire
     }
 
     var dictionary: [String: Any] {
@@ -113,8 +108,7 @@ struct DNIChecks {
             "brightness": brightness,
             "glare": glare,
             "shadows": shadows,
-            "edgeOcclusion": edgeOcclusion,
-            "moire": moire
+            "edgeOcclusion": edgeOcclusion
         ]
     }
 }
@@ -350,8 +344,6 @@ struct DNIQuality {
     let skinEdgeObstruction: Double
     let illuminationSpread: Double
     let shadowBoundary: Double
-    let moire: Double
-    let moireCoverage: Double
 
     var dictionary: [String: Any] {
         return [
@@ -365,9 +357,7 @@ struct DNIQuality {
             "edgeObstruction": Self.round(edgeObstruction),
             "skinEdgeObstruction": Self.round(skinEdgeObstruction),
             "illuminationSpread": Self.round(illuminationSpread),
-            "shadowBoundary": Self.round(shadowBoundary),
-            "moire": Self.round(moire),
-            "moireCoverage": Self.round(moireCoverage)
+            "shadowBoundary": Self.round(shadowBoundary)
         ]
     }
 
@@ -400,7 +390,6 @@ enum DNIAnalysisState: String {
     case avoidGlare
     case unevenLighting
     case edgeOccluded
-    case screenMoire
     case holdStill
     case waitingForFocus
     case ready

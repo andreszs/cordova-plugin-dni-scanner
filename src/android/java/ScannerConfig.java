@@ -8,9 +8,13 @@ final class ScannerConfig {
     static final float MIN_GUIDE_MARGIN_PERCENT = 0f;
     static final float DEFAULT_GUIDE_MARGIN_PERCENT = 3f;
     static final float MAX_GUIDE_MARGIN_PERCENT = 20f;
+    static final float MIN_CROP_PADDING_PERCENT = 0f;
+    static final float DEFAULT_CROP_PADDING_PERCENT = 3f;
+    static final float MAX_CROP_PADDING_PERCENT = 10f;
     static final ScannerConfig DEFAULT = new ScannerConfig(
         DEFAULT_MAX_OUTPUT_LONG_EDGE,
-        DEFAULT_GUIDE_MARGIN_PERCENT
+        DEFAULT_GUIDE_MARGIN_PERCENT,
+        DEFAULT_CROP_PADDING_PERCENT
     );
 
     final int analysisMaxDimension = 512;
@@ -23,7 +27,21 @@ final class ScannerConfig {
     final float maxDocumentArea = 0.82f;
     final float maxCenterOffset = 0.24f;
     final float minDetectionScore = 0.38f;
-    final float cropInsetFraction = 0.004f;
+    // The corrected JPEG deliberately includes a small safety margin. Losing a
+    // document edge is more harmful than retaining a narrow strip of background.
+    final float cropPaddingPercent;
+    final float cropPaddingFraction;
+    // Crop completeness is mandatory even when visual padding is configured as zero.
+    // The detected card must have enough source-image clearance to prove that none of
+    // its sides were truncated by ImageCapture or by a displaced inner quadrilateral.
+    final float minimumCropIntegrityClearanceFraction = 0.015f;
+    final float cropIntegrityGuardPixels = 2f;
+    // A detected line can be a strong printed line just inside the physical
+    // card. The still-image pass searches outward for a plausible enclosing edge.
+    final float outwardEdgeSearchFraction = 0.10f;
+    final float minimumOutwardEdgeSupport = 0.48f;
+    final float minimumRelativeOutwardEdgeSupport = 0.68f;
+    final float outwardEdgeDistanceBonus = 0.14f;
 
     final int houghAngleBins = 90;
     final int houghMaxLines = 40;
@@ -136,27 +154,17 @@ final class ScannerConfig {
     final float stillSkinCorroboratingEdgeGapFraction = 0.10f;
     final long occlusionMessageDurationMs = 2200L;
 
-    // Screen moire is reported for every scan but only blocks when the
-    // checks.moire flag is enabled. Short autocorrelation windows keep this
-    // diagnostic deterministic and inexpensive on older devices.
-    final int moireSampleWidth = 320;
-    final int moireSampleHeight = 200;
-    final int moireTileColumns = 6;
-    final int moireTileRows = 5;
-    final int moireMinimumLag = 2;
-    final int moireMaximumLag = 10;
-    final float moireMinimumResidualRms = 3.0f;
-    final float moireTileCorrelationThreshold = 0.42f;
-    final int moireMinimumValidTiles = 10;
-    final float maxMoireScore = 0.09f;
-    final float maxMoireCoverage = 0.09f;
-
     final float maxCornerMotion = 0.018f;
     final float maxAreaChange = 0.035f;
     // Elapsed time remains the primary stability requirement. Three frames avoid
-    // turning that 550 ms hold into several seconds on slow processors.
+    // turning that 500 ms hold into several seconds on slow processors.
     final int stableFrames = 3;
-    final long stableDurationMs = 550L;
+    final long stableDurationMs = 500L;
+    // Even when optional motion stability is disabled, never capture from one
+    // isolated quadrilateral. This is a detector-integrity requirement, not a
+    // user-selectable motion-quality check.
+    final int geometryConfirmationFrames = 3;
+    final long geometryConfirmationDurationMs = 240L;
 
     // Device-motion gating complements corner tracking. Gyroscope rotation is
     // the strongest blur predictor; linear acceleration catches translation and
@@ -168,7 +176,7 @@ final class ScannerConfig {
     final float maxLinearAcceleration = 0.34f;
     final float maxAccelerationSpike = 0.90f;
     final float accelerometerGravityFilterAlpha = 0.82f;
-    final long motionStableDurationMs = 700L;
+    final long motionStableDurationMs = 300L;
     final long motionSensorStartupTimeoutMs = 1000L;
     final long motionSensorStaleTimeoutMs = 750L;
     final long motionRetryMessageDurationMs = 450L;
@@ -189,7 +197,8 @@ final class ScannerConfig {
     final float minimumSideConfidence = 0.76f;
     final float minimumVariantConfidence = 0.72f;
 
-    private ScannerConfig(int maxOutputLongEdge, float guideMarginPercent) {
+    private ScannerConfig(int maxOutputLongEdge, float guideMarginPercent,
+                          float cropPaddingPercent) {
         if (maxOutputLongEdge < MIN_OUTPUT_LONG_EDGE
             || maxOutputLongEdge > MAX_OUTPUT_LONG_EDGE) {
             throw new IllegalArgumentException("Invalid maximum output long edge");
@@ -200,20 +209,42 @@ final class ScannerConfig {
             || guideMarginPercent > MAX_GUIDE_MARGIN_PERCENT) {
             throw new IllegalArgumentException("Invalid guide margin percentage");
         }
+        if (Float.isNaN(cropPaddingPercent)
+            || Float.isInfinite(cropPaddingPercent)
+            || cropPaddingPercent < MIN_CROP_PADDING_PERCENT
+            || cropPaddingPercent > MAX_CROP_PADDING_PERCENT) {
+            throw new IllegalArgumentException("Invalid crop padding percentage");
+        }
         this.maxOutputLongEdge = maxOutputLongEdge;
         this.guideMarginPercent = guideMarginPercent;
         this.guideMarginFraction = guideMarginPercent / 100f;
+        this.cropPaddingPercent = cropPaddingPercent;
+        this.cropPaddingFraction = cropPaddingPercent / 100f;
     }
 
     static ScannerConfig withMaxOutputLongEdge(int maxOutputLongEdge) {
-        return forSession(maxOutputLongEdge, DEFAULT_GUIDE_MARGIN_PERCENT);
+        return forSession(
+            maxOutputLongEdge,
+            DEFAULT_GUIDE_MARGIN_PERCENT,
+            DEFAULT_CROP_PADDING_PERCENT
+        );
     }
 
     static ScannerConfig forSession(int maxOutputLongEdge, float guideMarginPercent) {
+        return forSession(
+            maxOutputLongEdge,
+            guideMarginPercent,
+            DEFAULT_CROP_PADDING_PERCENT
+        );
+    }
+
+    static ScannerConfig forSession(int maxOutputLongEdge, float guideMarginPercent,
+                                    float cropPaddingPercent) {
         if (maxOutputLongEdge == DEFAULT_MAX_OUTPUT_LONG_EDGE
-            && guideMarginPercent == DEFAULT_GUIDE_MARGIN_PERCENT) {
+            && guideMarginPercent == DEFAULT_GUIDE_MARGIN_PERCENT
+            && cropPaddingPercent == DEFAULT_CROP_PADDING_PERCENT) {
             return DEFAULT;
         }
-        return new ScannerConfig(maxOutputLongEdge, guideMarginPercent);
+        return new ScannerConfig(maxOutputLongEdge, guideMarginPercent, cropPaddingPercent);
     }
 }

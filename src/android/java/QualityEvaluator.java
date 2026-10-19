@@ -6,18 +6,12 @@ import java.util.ArrayDeque;
 
 final class QualityEvaluator {
     private final ScannerConfig config;
-    private final MoireDetector moireDetector;
 
     QualityEvaluator(ScannerConfig config) {
         this.config = config;
-        this.moireDetector = new MoireDetector(config);
     }
 
     QualityMetrics evaluate(LumaFrame frame, DocumentQuad quad) {
-        return evaluate(frame, quad, true);
-    }
-
-    QualityMetrics evaluate(LumaFrame frame, DocumentQuad quad, boolean includeMoire) {
         int minX = clamp((int) Math.floor(minX(quad)), 1, frame.width - 2);
         int maxX = clamp((int) Math.ceil(maxX(quad)), 1, frame.width - 2);
         int minY = clamp((int) Math.floor(minY(quad)), 1, frame.height - 2);
@@ -108,10 +102,6 @@ final class QualityEvaluator {
         float warmEdgeRunFraction = warmEdgeRunFraction(frame, quad);
         float skinEdgeRunFraction = skinEdgeRunFraction(frame, quad);
         IlluminationMetrics illumination = illuminationMetrics(frame, quad);
-        MoireDetector.Metrics moire = includeMoire
-            ? moireDetector.evaluate(frame, quad)
-            : new MoireDetector.Metrics(0f, 0f);
-
         return new QualityMetrics(
             sharpness,
             brightness,
@@ -124,9 +114,7 @@ final class QualityEvaluator {
             warmEdgeRunFraction,
             illumination.spread,
             illumination.shadowBoundary,
-            skinEdgeRunFraction,
-            moire.score,
-            moire.coverage
+            skinEdgeRunFraction
         );
     }
 
@@ -170,9 +158,6 @@ final class QualityEvaluator {
         if (checks.shadows && hasUnevenLighting(quality)) {
             return AnalysisResult.State.UNEVEN_LIGHTING;
         }
-        if (checks.moire && hasMoire(quality)) {
-            return AnalysisResult.State.SCREEN_MOIRE;
-        }
         if (checks.sharpness && quality.sharpness < config.minSharpnessVariance) {
             return AnalysisResult.State.WAITING_FOR_FOCUS;
         }
@@ -183,11 +168,6 @@ final class QualityEvaluator {
         return quality.shadowBoundary > config.maxSevereShadowBoundary
             || (quality.illuminationSpread > config.maxIlluminationSpread
                 && quality.shadowBoundary > config.maxShadowBoundary);
-    }
-
-    boolean hasMoire(QualityMetrics quality) {
-        return quality.moireScore > config.maxMoireScore
-            && quality.moireCoverage > config.maxMoireCoverage;
     }
 
     boolean hasEdgeOcclusion(QualityMetrics quality) {

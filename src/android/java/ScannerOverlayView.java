@@ -261,21 +261,23 @@ final class ScannerOverlayView extends View {
             skinSignalAcceptable,
             checks.edgeOcclusion
         ));
-        rows.add(new DebugRow(
-            String.format(Locale.US, "moire %.3f cov %.2f", quality.moireScore,
-                quality.moireCoverage),
-            !qualityEvaluator.hasMoire(quality),
-            checks.moire
-        ));
+        int requiredFrames = checks.stability
+            ? ScannerConfig.DEFAULT.stableFrames
+            : ScannerConfig.DEFAULT.geometryConfirmationFrames;
+        long requiredDuration = checks.stability
+            ? ScannerConfig.DEFAULT.stableDurationMs
+            : ScannerConfig.DEFAULT.geometryConfirmationDurationMs;
         boolean stable = result.state == AnalysisResult.State.READY
             || result.state == AnalysisResult.State.CAPTURING
-            || (result.stableFrameCount >= ScannerConfig.DEFAULT.stableFrames
-                && result.stableDurationMs >= ScannerConfig.DEFAULT.stableDurationMs);
+            || (result.stableFrameCount >= requiredFrames
+                && result.stableDurationMs >= requiredDuration);
         rows.add(new DebugRow(
-            String.format(Locale.US, "estable %df %dms", result.stableFrameCount,
+            String.format(Locale.US, "%s %df %dms",
+                checks.stability ? "estable" : "geometria",
+                result.stableFrameCount,
                 result.stableDurationMs),
             stable,
-            checks.stability
+            true
         ));
         MotionSnapshot motion = result.motion;
         if (motion == null || !motion.available) {

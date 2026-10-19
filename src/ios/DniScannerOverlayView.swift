@@ -212,12 +212,6 @@ final class DNIOverlayView: UIView {
                 enabled: checks.edgeOcclusion
             ),
             DebugRow(
-                text: String(format: "moire %.3f cov %.2f", quality.moire, quality.moireCoverage),
-                acceptable: quality.moire <= DNIEngine.maximumMoire
-                    && quality.moireCoverage <= DNIEngine.maximumMoireCoverage,
-                enabled: checks.moire
-            ),
-            DebugRow(
                 text: String(
                     format: "visual %df %dms",
                     current.stableFrameCount,

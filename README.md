@@ -108,12 +108,12 @@ const result = await DniScanner.scan({
     debugMode: false,
     maxOutputLongEdge: 1280,
     guideMarginPercent: 3,
+    cropPaddingPercent: 3,
     instructionText: "Ubicá el frente del DNI en el recuadro",
     checks: {
         glare: true,
         shadows: true,
-        edgeOcclusion: true,
-        moire: false
+        edgeOcclusion: true
     },
     timeoutMs: 45000
 });
@@ -141,8 +141,9 @@ Use `side: "back"` to capture the back.
 | `debugMode` | `boolean` | `true` | Shows live metrics over the camera. Enabled checks are green inside their threshold and red outside it; disabled checks are gray. It does not change validation. |
 | `maxOutputLongEdge` | integer `640–2048` | `1280` | Maximum long edge of the corrected JPEG. The actual image may be smaller when the capture contains fewer effective pixels. |
 | `guideMarginPercent` | number `0–20` | `3` | Permitted outward margin around the dotted guide, measured as a percentage of the guide's shorter edge. Candidates extending farther are ignored. |
+| `cropPaddingPercent` | number `0–10` | `3` | Android safety padding applied independently outside each refined document edge. Capture always retries when the source image cannot preserve all four sides. |
 | `instructionText` | `string \| null` | `""` | Optional text above the guide. Missing, empty, or `null` hides it. |
-| `checks` | `object \| null` | standard checks enabled | Enables or disables individual acceptance checks. Missing properties stay enabled except `moire`, which defaults to `false`. |
+| `checks` | `object \| null` | standard checks enabled | Enables or disables individual acceptance checks. Missing properties stay enabled. |
 | `timeoutMs` | integer `>= 0` | `0` | Maximum session duration. Zero disables the timeout. |
 
 Only one scan may run at a time.
@@ -156,13 +157,12 @@ Only one scan may run at a time.
 | `documentSize` | Rejects a card that is too close or too far. |
 | `centering` | Requires the card near the guide. |
 | `perspective` | Limits perspective distortion. |
-| `stability` | Requires stable geometry across frames. When available, gyroscope and acceleration data also block capture while the device is moving. |
+| `stability` | Enables the longer stability hold and, when available, gyroscope and acceleration gating. A short multi-frame geometric confirmation remains mandatory when this check is disabled. |
 | `sharpness` | Rejects blur using Laplacian variance. |
 | `brightness` | Rejects under/overexposure and severe clipping. |
 | `glare` | Rejects large localized reflections. |
 | `shadows` | Rejects strong uneven illumination. |
 | `edgeOcclusion` | Rejects interrupted edges and likely fingers/hands. |
-| `moire` | Rejects broad periodic interference consistent with photographing a display. Defaults to `false`; its diagnostic metrics are still returned. |
 
 Four-corner document detection is always required for cropping and perspective correction. Disabling a check reduces capture guarantees.
 
@@ -195,6 +195,7 @@ A successful scan resolves with metadata and a temporary JPEG:
   "height": 807,
   "maxOutputLongEdge": 1280,
   "guideMarginPercent": 3.0,
+  "cropPaddingPercent": 3.0,
   "mimeType": "image/jpeg",
   "bytes": 613245,
   "quality": {
@@ -208,9 +209,7 @@ A successful scan resolves with metadata and a temporary JPEG:
     "edgeObstruction": 0.0,
     "skinEdgeObstruction": 0.0,
     "illuminationSpread": 0.08,
-    "shadowBoundary": 0.04,
-    "moire": 0.05,
-    "moireCoverage": 0.0
+    "shadowBoundary": 0.04
   },
   "motion": {
     "sensorAvailable": true,
@@ -231,8 +230,7 @@ A successful scan resolves with metadata and a temporary JPEG:
     "brightness": true,
     "glare": true,
     "shadows": true,
-    "edgeOcclusion": true,
-    "moire": false
+    "edgeOcclusion": true
   },
   "recognitionSignals": ["printed_content"],
   "perspectiveCorrected": true,
@@ -259,11 +257,12 @@ A successful scan resolves with metadata and a temporary JPEG:
 | `documentCandidate` | `true` when a card-like quadrilateral was detected, corrected, and returned. It is not an authenticity result. |
 | `usableForOcr` | Whether the final image meets permissive, non-configurable baseline exposure, focus, and severe-glare limits intended for downstream OCR. It does not block capture. |
 | `contentScore` | Position-independent printed-texture score. It is diagnostic and never blocks capture. |
-| `qualityWarnings` | Non-blocking warnings such as `low_sharpness`, `low_light`, `high_light`, `glare`, `uneven_lighting`, `edge_obstruction`, or `screen_moire`. |
+| `qualityWarnings` | Non-blocking warnings such as `low_sharpness`, `low_light`, `high_light`, `glare`, `uneven_lighting`, or `edge_obstruction`. |
 | `confidence` | `document`, `content`, optional `side`/`variant`, and `overall` heuristic scores. |
 | `width` / `height` / `mimeType` / `bytes` | Encoded image properties. |
 | `maxOutputLongEdge` | Effective output-size limit requested for this scan. The actual long edge can be smaller. |
 | `guideMarginPercent` | Effective outward detection margin around the dotted guide. |
+| `cropPaddingPercent` | Effective Android safety padding around the refined crop. |
 | `quality` | Normalized final-image measurements listed below. |
 | `motion` | Inertial-sensor availability, sampling state, filtered rotation/acceleration, and quiet duration at capture. Measurements are `null` when unavailable; missing or inactive sensors fall back to visual stability. |
 | `appliedChecks` | Effective checks used for the scan. These are configuration flags, not scores. |
@@ -287,8 +286,6 @@ All confidence and quality numbers are rounded to four decimals and are diagnost
 | `edgeObstruction` | Longest warm-colored peripheral run. |
 | `skinEdgeObstruction` | Longest skin-compatible region crossing an edge. |
 | `illuminationSpread` / `shadowBoundary` | Uneven-lighting measurements; lower is better. |
-| `moire` | Normalized strength and extent of periodic high-frequency interference; lower is better. It is always reported. |
-| `moireCoverage` | Fraction of evaluated document regions with a strong periodic pattern; lower is better. It is always reported. |
 
 Possible `recognitionSignals` are `printed_content`, `layout_signature`, `machine_readable_rows`, `square_dense_region`, `wide_dense_region`, and `localized_lower_right_dense_region`. With `sideValidation: "off"`, only the position-independent `printed_content` signal is exposed. These are supporting observations, not decoded QR, PDF417, MRZ, or personal data.
 
@@ -322,8 +319,10 @@ Quality rejection does not produce `PROCESSING_FAILED`; the image is discarded a
 - Android uses CameraX `Preview`, `ImageAnalysis`, and `ImageCapture`. iOS uses `AVCaptureVideoPreviewLayer`, `AVCaptureVideoDataOutput`, and `AVCapturePhotoOutput`. Both analyze reduced preview frames of at most 512 px away from the UI thread.
 - Android uses local Sobel/Hough processing to find and score a DNI-shaped quadrilateral. iOS uses Apple's on-device Vision rectangle detector first and a lightweight local Sobel/Hough fallback when Vision misses a plausible outer edge. Neither platform includes a third-party computer-vision library, model download, or network service.
 - On iOS, the analysis frame is center-cropped to the same aspect-fill viewport shown by the camera preview. The accepted region is derived from the visible dotted guide, so size, centering, and boundary checks refer to what the user actually sees.
-- Framing, perspective, stability, focus, exposure, glare, shadows, edge obstruction, and display moiré are checked before capture and rechecked on the photograph.
+- Framing, perspective, stability, focus, exposure, glare, shadows, and edge obstruction are checked before capture and rechecked on the photograph. Android also refines each still-image edge outward before correction so strong internal print lines are less likely to become crop boundaries.
 - When `checks.stability` is enabled, Android uses the device gyroscope and acceleration sensors while iOS samples rotation and user acceleration through Core Motion at approximately 50 Hz. Movement blocks analysis and the shutter; movement detected during capture discards that photo and resumes scanning. Missing, late, or stale sensors fall back to visual stability instead of blocking capture.
+- Android always confirms a compatible quadrilateral across several frames, even when `checks.stability` is disabled. Disabling stability skips the longer hold and sensor gate; it no longer permits capture from one isolated detection.
+- Android crop integrity is mandatory: every detected side must leave enough source-image clearance for an independent outward safety margin. A capture that would clamp or lose any edge is discarded and scanning resumes.
 - Stable valid frames trigger native photo capture; the result is perspective-corrected and saved as JPEG 95 with a configurable maximum long edge (1280 px by default, capped at 2048 px). Colors are preserved without paper-scanner filters.
 - A position-independent printed-content score is returned for downstream diagnostics and never blocks capture. In `advisory` or `strict`, a compact 4×3 edge/saturation classifier also estimates side and generation; those estimates remain heuristic and variant never blocks capture.
 
@@ -369,6 +368,15 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 
 ## Changelog
 
+### Unreleased
+
+- Reduced the full geometry hold to 500 ms and the inertial-sensor quiet window to 300 ms while retaining three-frame confirmation and capture-time motion rejection.
+- Prevented intermittent Android preview zoom after startup or auto-rotation by waiting for a stable `PreviewView` layout and explicitly restoring CameraX to `1x` before analysis resumes.
+- Added mandatory short multi-frame geometry confirmation on Android independently of the optional motion-stability check.
+- Added outward still-image edge refinement and configurable `cropPaddingPercent` safety padding on Android to prefer extra background over clipped DNI content.
+- Made four-side crop integrity mandatory on Android and replaced uniform clamping with independent per-edge expansion.
+- Rechecked corrected-image exposure and clipping when the brightness control is enabled.
+
 ### 0.2.1
 
 - Replaced the former requested-side check with `sideValidation: "off" | "advisory" | "strict"`; the high-recall `off` policy is now the default.
@@ -398,7 +406,6 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 - Changed the default corrected-image maximum long edge from 2048 to 1280 px.
 - Added the effective output-size limit to the result metadata.
 - Restricted geometric detection to the dotted guide and added the configurable `guideMarginPercent` outward margin.
-- Added always-reported `quality.moire` and `quality.moireCoverage` diagnostics plus the configurable `checks.moire` rejection control.
 
 ### 0.1.0
 

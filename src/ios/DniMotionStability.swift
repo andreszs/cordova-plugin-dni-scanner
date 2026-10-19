@@ -7,7 +7,7 @@ struct DNIMotionParameters {
         maxGyroscopeSpikeRadPerSecond: 0.34,
         maxLinearAcceleration: 0.34,
         maxAccelerationSpike: 0.90,
-        stableDuration: 0.700,
+        stableDuration: 0.300,
         sensorStartupTimeout: 1.000,
         sensorStaleTimeout: 0.750
     )
