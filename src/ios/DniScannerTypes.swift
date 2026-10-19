@@ -137,7 +137,6 @@ struct DNIOptions {
     let showFlashButton: Bool
     let debugMode: Bool
     let maxOutputLongEdge: Int
-    let guideMarginPercent: CGFloat
     let instructionText: String
     let timeoutMs: Int
     let checks: DNIChecks
@@ -198,12 +197,6 @@ struct DNIOptions {
             throw DNIError.invalidArgument("La opción maxOutputLongEdge debe ser un entero entre 640 y 2048.")
         }
 
-        let marginNumber = dictionary["guideMarginPercent"] as? NSNumber ?? 3
-        let margin = CGFloat(marginNumber.doubleValue)
-        guard margin.isFinite, margin >= 0, margin <= 20 else {
-            throw DNIError.invalidArgument("La opción guideMarginPercent debe estar entre 0 y 20.")
-        }
-
         let instruction: String
         if let raw = dictionary["instructionText"], !(raw is NSNull) {
             guard let text = raw as? String else {
@@ -239,7 +232,6 @@ struct DNIOptions {
         self.showFlashButton = try strictBool("showFlashButton", fallback: true)
         self.debugMode = try strictBool("debugMode", fallback: true)
         self.maxOutputLongEdge = output
-        self.guideMarginPercent = margin
         self.instructionText = instruction
         self.timeoutMs = timeout
         self.checks = try DNIChecks(dictionary: checksDictionary)

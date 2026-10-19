@@ -29,8 +29,6 @@ function normalizeError(error) {
  *          flashMode?: ('off'|'auto'|'on'), showCloseButton?: boolean,
  *          showFlashButton?: boolean, debugMode?: boolean,
  *          maxOutputLongEdge?: number,
- *          guideMarginPercent?: number,
- *          cropPaddingPercent?: number,
  *          instructionText?: string,
  *          checks?: {documentSize?: boolean, centering?: boolean,
  *          perspective?: boolean, stability?: boolean, sharpness?: boolean,

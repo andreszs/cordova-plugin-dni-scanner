@@ -126,14 +126,6 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             }
             config = ScannerConfig.forSession(
                 options.optInt("maxOutputLongEdge", ScannerConfig.DEFAULT_MAX_OUTPUT_LONG_EDGE),
-                (float) options.optDouble(
-                    "guideMarginPercent",
-                    ScannerConfig.DEFAULT_GUIDE_MARGIN_PERCENT
-                ),
-                (float) options.optDouble(
-                    "cropPaddingPercent",
-                    ScannerConfig.DEFAULT_CROP_PADDING_PERCENT
-                ),
                 scanProfile
             );
             flashMode = options.optString("flashMode", "off");
@@ -922,8 +914,6 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         json.put("width", result.width);
         json.put("height", result.height);
         json.put("maxOutputLongEdge", config.maxOutputLongEdge);
-        json.put("guideMarginPercent", round(config.guideMarginPercent));
-        json.put("cropPaddingPercent", round(config.cropPaddingPercent));
         json.put("mimeType", "image/jpeg");
         json.put("bytes", result.file.length());
         json.put("quality", qualityJson);

@@ -206,6 +206,8 @@ final class DNIEngine {
     static let maximumIlluminationSpread = 0.31
     static let maximumShadowBoundary = 0.08
     static let maximumEdgeObstruction = 0.28
+    static let guideMarginPercent: CGFloat = 3
+    static let stillDetectionMarginPercent: CGFloat = 8
     static let minimumSharpness = 70.0
     // Permissive diagnostics for downstream OCR. They do not gate capture.
     static let minimumOCRSharpness = 55.0
@@ -235,13 +237,12 @@ final class DNIEngine {
         raster: DNIRaster,
         checks: DNIChecks,
         allowedRegion: CGRect,
-        guideMarginPercent: CGFloat,
         profile: DNIScanProfile = .dni
     ) throws -> DNIAnalysis {
         guard let detection = try detect(
             raster: raster,
             allowedRegion: allowedRegion,
-            guideMarginPercent: guideMarginPercent
+            guideMarginPercent: Self.guideMarginPercent
         ) else {
             return DNIAnalysis(
                 state: .searching,
@@ -605,7 +606,7 @@ final class DNIStillProcessor {
         guard let detection = try engine.detect(
             raster: source,
             allowedRegion: permitted,
-            guideMarginPercent: max(8, options.guideMarginPercent)
+            guideMarginPercent: DNIEngine.stillDetectionMarginPercent
         ) else {
             throw DNIError.retry("No se pudieron confirmar los cuatro bordes en la fotografía.", .searching)
         }

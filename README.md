@@ -108,8 +108,6 @@ const result = await DniScanner.scan({
     showFlashButton: false,
     debugMode: false,
     maxOutputLongEdge: 1280,
-    guideMarginPercent: 3,
-    cropPaddingPercent: 3,
     instructionText: "Ubicá el frente del DNI en el recuadro",
     checks: {
         glare: true,
@@ -159,8 +157,6 @@ obstructions.
 | `showFlashButton` | `boolean` | `true` | Shows the flash selector when the device has a flash unit. |
 | `debugMode` | `boolean` | `true` | Shows live metrics over the camera. Enabled checks are green inside their threshold and red outside it; disabled checks are gray. It does not change validation. |
 | `maxOutputLongEdge` | integer `640–2048` | `1280` | Maximum long edge of the corrected JPEG. The actual image may be smaller when the capture contains fewer effective pixels. |
-| `guideMarginPercent` | number `0–20` | `3` | Permitted outward margin around the dotted guide, measured as a percentage of the guide's shorter edge. Candidates extending farther are ignored. |
-| `cropPaddingPercent` | number `0–10` | `3` | Android safety padding applied independently outside each refined document edge. Capture always retries when the source image cannot preserve all four sides. |
 | `instructionText` | `string \| null` | `""` | Optional text above the guide. Missing, empty, or `null` hides it. |
 | `checks` | `object \| null` | standard checks enabled | Enables or disables individual acceptance checks. Missing properties stay enabled. |
 | `timeoutMs` | integer `>= 0` | `0` | Maximum session duration. Zero disables the timeout. |
@@ -214,8 +210,6 @@ A successful scan resolves with metadata and a temporary JPEG:
   "width": 1280,
   "height": 807,
   "maxOutputLongEdge": 1280,
-  "guideMarginPercent": 3.0,
-  "cropPaddingPercent": 3.0,
   "mimeType": "image/jpeg",
   "bytes": 613245,
   "quality": {
@@ -282,8 +276,6 @@ A successful scan resolves with metadata and a temporary JPEG:
 | `confidence` | `document`, `content`, optional `side`/`variant`, and `overall` heuristic scores. |
 | `width` / `height` / `mimeType` / `bytes` | Encoded image properties. |
 | `maxOutputLongEdge` | Effective output-size limit requested for this scan. The actual long edge can be smaller. |
-| `guideMarginPercent` | Effective outward detection margin around the dotted guide. |
-| `cropPaddingPercent` | Effective Android safety padding around the refined crop. |
 | `quality` | Normalized final-image measurements listed below. |
 | `motion` | Inertial-sensor availability, sampling state, filtered rotation/acceleration, and quiet duration at capture. Measurements are `null` when unavailable; missing or inactive sensors fall back to visual stability. |
 | `appliedChecks` | Effective checks used for the scan. These are configuration flags, not scores. |
@@ -395,7 +387,7 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 - Reduced the full geometry hold to 500 ms and the inertial-sensor quiet window to 300 ms while retaining three-frame confirmation and capture-time motion rejection.
 - Prevented intermittent Android preview zoom after startup or auto-rotation by waiting for a stable `PreviewView` layout and explicitly restoring CameraX to `1x` before analysis resumes.
 - Added mandatory short multi-frame geometry confirmation on Android independently of the optional motion-stability check.
-- Added outward still-image edge refinement and configurable `cropPaddingPercent` safety padding on Android to prefer extra background over clipped DNI content.
+- Added outward still-image edge refinement and fixed safety padding on Android to prefer extra background over clipped DNI content.
 - Made four-side crop integrity mandatory on Android and replaced uniform clamping with independent per-edge expansion.
 - Rechecked corrected-image exposure and clipping when the brightness control is enabled.
 
@@ -427,7 +419,7 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 - Added the `maxOutputLongEdge` option, configurable from 640 to 2048 px.
 - Changed the default corrected-image maximum long edge from 2048 to 1280 px.
 - Added the effective output-size limit to the result metadata.
-- Restricted geometric detection to the dotted guide and added the configurable `guideMarginPercent` outward margin.
+- Restricted geometric detection to the dotted guide with a small fixed outward tolerance.
 
 ### 0.1.0
 

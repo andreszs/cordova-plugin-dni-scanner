@@ -16,7 +16,7 @@ public final class PerspectiveTransformerHostTest {
         if (ScannerConfig.DEFAULT.maxOutputLongEdge != 1280) {
             throw new AssertionError("The default maximum output long edge must be 1280 px");
         }
-        if (ScannerConfig.DEFAULT.cropPaddingPercent != 3f) {
+        if (ScannerConfig.DEFAULT.cropPaddingPercent != ScannerConfig.CROP_PADDING_PERCENT) {
             throw new AssertionError("The default crop safety padding must be 3 percent");
         }
 

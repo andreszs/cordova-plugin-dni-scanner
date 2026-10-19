@@ -744,7 +744,6 @@ extension DNIViewController: AVCaptureVideoDataOutputSampleBufferDelegate {
                 raster: raster,
                 checks: options.checks,
                 allowedRegion: geometry.guide,
-                guideMarginPercent: options.guideMarginPercent,
                 profile: options.profile
             )
             handleAnalysis(result)

@@ -153,7 +153,6 @@ final class DniScanner: CDVPlugin {
             "width": scan.width,
             "height": scan.height,
             "maxOutputLongEdge": options.maxOutputLongEdge,
-            "guideMarginPercent": round(Double(options.guideMarginPercent)),
             "mimeType": "image/jpeg",
             "bytes": bytes,
             "quality": scan.quality.dictionary,
