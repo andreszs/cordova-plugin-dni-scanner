@@ -100,7 +100,8 @@ final class DNIViewController: UIViewController {
             instruction: options.instructionText,
             debugMode: options.debugMode,
             orientation: options.orientation,
-            checks: options.checks
+            checks: options.checks,
+            profile: options.profile
         )
         overlayView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(overlayView)
@@ -547,7 +548,8 @@ final class DNIViewController: UIViewController {
             do {
                 let directory = try self.cacheDirectory()
                 let scan = try self.stillProcessor.process(data: data, options: self.options, directory: directory)
-                if self.options.sideValidation == .strict
+                if self.options.profile == .dni
+                    && self.options.sideValidation == .strict
                     && scan.recognition.side != self.options.side {
                     try? FileManager.default.removeItem(at: scan.fileURL)
                     let requested = self.options.side == "front" ? "frente" : "dorso"
@@ -742,7 +744,8 @@ extension DNIViewController: AVCaptureVideoDataOutputSampleBufferDelegate {
                 raster: raster,
                 checks: options.checks,
                 allowedRegion: geometry.guide,
-                guideMarginPercent: options.guideMarginPercent
+                guideMarginPercent: options.guideMarginPercent,
+                profile: options.profile
             )
             handleAnalysis(result)
         } catch {

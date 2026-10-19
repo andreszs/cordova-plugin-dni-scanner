@@ -14,8 +14,11 @@ final class ScannerConfig {
     static final ScannerConfig DEFAULT = new ScannerConfig(
         DEFAULT_MAX_OUTPUT_LONG_EDGE,
         DEFAULT_GUIDE_MARGIN_PERCENT,
-        DEFAULT_CROP_PADDING_PERCENT
+        DEFAULT_CROP_PADDING_PERCENT,
+        ScanProfile.DNI
     );
+
+    final ScanProfile profile;
 
     final int analysisMaxDimension = 512;
     final long analysisIntervalMs = 80L;
@@ -86,8 +89,8 @@ final class ScannerConfig {
     final float maxClippedFraction = 0.45f;
     // A connected smooth highlight is more significant than isolated white
     // print. These limits intentionally favor rejecting a questionable frame.
-    final float maxGlareFraction = 0.14f;
-    final float maxGlareBlobFraction = 0.09f;
+    final float maxGlareFraction;
+    final float maxGlareBlobFraction;
     final int glareConfirmationFrames = 3;
 
     // Permissive diagnostics for downstream OCR. These values do not gate
@@ -110,9 +113,9 @@ final class ScannerConfig {
     final float illuminationLowPercentile = 0.20f;
     final float illuminationHighPercentile = 0.80f;
     final int minShadowTileDifference = 18;
-    final float maxIlluminationSpread = 0.22f;
-    final float maxShadowBoundary = 0.075f;
-    final float maxSevereShadowBoundary = 0.21f;
+    final float maxIlluminationSpread;
+    final float maxShadowBoundary;
+    final float maxSevereShadowBoundary;
 
     // Hands/fingers are rejected without a general-purpose vision model. The
     // first signal looks for a sustained loss of contrast across a detected
@@ -198,7 +201,7 @@ final class ScannerConfig {
     final float minimumVariantConfidence = 0.72f;
 
     private ScannerConfig(int maxOutputLongEdge, float guideMarginPercent,
-                          float cropPaddingPercent) {
+                          float cropPaddingPercent, ScanProfile profile) {
         if (maxOutputLongEdge < MIN_OUTPUT_LONG_EDGE
             || maxOutputLongEdge > MAX_OUTPUT_LONG_EDGE) {
             throw new IllegalArgumentException("Invalid maximum output long edge");
@@ -216,10 +219,26 @@ final class ScannerConfig {
             throw new IllegalArgumentException("Invalid crop padding percentage");
         }
         this.maxOutputLongEdge = maxOutputLongEdge;
+        this.profile = profile == null ? ScanProfile.DNI : profile;
         this.guideMarginPercent = guideMarginPercent;
         this.guideMarginFraction = guideMarginPercent / 100f;
         this.cropPaddingPercent = cropPaddingPercent;
         this.cropPaddingFraction = cropPaddingPercent / 100f;
+        if (this.profile == ScanProfile.GENERIC_CARD) {
+            // Generic cards can contain large white panels, gradients and strong
+            // brand colors. Preserve only severe glare/shadow rejection here.
+            this.maxGlareFraction = 0.23f;
+            this.maxGlareBlobFraction = 0.20f;
+            this.maxIlluminationSpread = 0.45f;
+            this.maxShadowBoundary = 0.36f;
+            this.maxSevereShadowBoundary = 0.48f;
+        } else {
+            this.maxGlareFraction = 0.14f;
+            this.maxGlareBlobFraction = 0.09f;
+            this.maxIlluminationSpread = 0.22f;
+            this.maxShadowBoundary = 0.075f;
+            this.maxSevereShadowBoundary = 0.21f;
+        }
     }
 
     static ScannerConfig withMaxOutputLongEdge(int maxOutputLongEdge) {
@@ -240,11 +259,22 @@ final class ScannerConfig {
 
     static ScannerConfig forSession(int maxOutputLongEdge, float guideMarginPercent,
                                     float cropPaddingPercent) {
+        return forSession(
+            maxOutputLongEdge,
+            guideMarginPercent,
+            cropPaddingPercent,
+            ScanProfile.DNI
+        );
+    }
+
+    static ScannerConfig forSession(int maxOutputLongEdge, float guideMarginPercent,
+                                    float cropPaddingPercent, ScanProfile profile) {
         if (maxOutputLongEdge == DEFAULT_MAX_OUTPUT_LONG_EDGE
             && guideMarginPercent == DEFAULT_GUIDE_MARGIN_PERCENT
-            && cropPaddingPercent == DEFAULT_CROP_PADDING_PERCENT) {
+            && cropPaddingPercent == DEFAULT_CROP_PADDING_PERCENT
+            && profile == ScanProfile.DNI) {
             return DEFAULT;
         }
-        return new ScannerConfig(maxOutputLongEdge, guideMarginPercent, cropPaddingPercent);
+        return new ScannerConfig(maxOutputLongEdge, guideMarginPercent, cropPaddingPercent, profile);
     }
 }

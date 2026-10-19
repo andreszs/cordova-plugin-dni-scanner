@@ -99,6 +99,7 @@ The demo supports Android and iOS, exposes every scan option and quality check, 
 
 ```javascript
 const result = await DniScanner.scan({
+    profile: "dni",
     side: "front",
     sideValidation: "off",
     orientation: "auto",
@@ -127,11 +128,29 @@ document.querySelector("img").src = result.imageUri;
 
 Use `side: "back"` to capture the back.
 
+For a credit/debit card, driver's license, or another ISO ID-1-sized card, use the
+content-agnostic profile:
+
+```javascript
+const result = await DniScanner.scan({
+    profile: "genericCard",
+    side: "any",
+    sideValidation: "off",
+    instructionText: "Enmarcá la tarjeta dentro del recuadro"
+});
+```
+
+This profile keeps geometric detection, crop completeness, perspective, focus,
+exposure, motion, and severe reflection/shadow checks. It does not run DNI
+side/variant recognition, and it avoids treating printed colors as skin or edge
+obstructions.
+
 ### Options
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `side` | `"front" \| "back"` | required | Requested DNI side. |
+| `profile` | `"dni" \| "genericCard"` | `"dni"` | `dni` enables optional DNI side/variant heuristics. `genericCard` accepts any ID-1-style card without inspecting its printed layout. |
+| `side` | `"front" \| "back" \| "any"` | required | Use `front`/`back` with `dni`; use `any` with `genericCard`. |
 | `sideValidation` | `"off" \| "advisory" \| "strict"` | `"off"` | Controls side recognition. `off` neither exposes nor enforces the heuristic side result, `advisory` returns the best-effort classification without blocking, and `strict` requires it to match `side`. |
 | `autoCapture` | `boolean` | `true` | Only `true` is currently supported. |
 | `orientation` | `"portrait" \| "landscape" \| "auto"` | `"portrait"` | Scanner orientation for this session. `auto` follows the phone while scanning; capture briefly locks the current orientation. Fixed landscape follows both physical landscape positions on iOS. |
@@ -175,6 +194,7 @@ A successful scan resolves with metadata and a temporary JPEG:
   "status": "success",
   "imageUri": "https://localhost/_dni_scanner_image_/dni-....jpg",
   "imagePath": "/data/user/0/.../cache/dni-scanner/dni-....jpg",
+  "profile": "dni",
   "requestedSide": "front",
   "sideValidation": "off",
   "detectedSide": "unknown",
@@ -250,6 +270,7 @@ A successful scan resolves with metadata and a temporary JPEG:
 | `status` | `"success"` for an accepted capture. Cancellation uses the separate result documented below. |
 | `imageUri` | WebView-safe local URL. Use it directly as an `<img>` source. |
 | `imagePath` | Native absolute path to the same private-cache JPEG. |
+| `profile` | Effective `"dni"` or `"genericCard"` scan profile. |
 | `requestedSide` | Side requested by the application and used for scanner instructions. |
 | `sideValidation` | Effective `"off"`, `"advisory"`, or `"strict"` policy. |
 | `detectedSide` / `sideMatchesRequested` | Best-effort side result and comparison. With `off`, they are `"unknown"` and `null`. Only `strict` can reject a mismatch or unknown side. |
@@ -287,7 +308,7 @@ All confidence and quality numbers are rounded to four decimals and are diagnost
 | `skinEdgeObstruction` | Longest skin-compatible region crossing an edge. |
 | `illuminationSpread` / `shadowBoundary` | Uneven-lighting measurements; lower is better. |
 
-Possible `recognitionSignals` are `printed_content`, `layout_signature`, `machine_readable_rows`, `square_dense_region`, `wide_dense_region`, and `localized_lower_right_dense_region`. With `sideValidation: "off"`, only the position-independent `printed_content` signal is exposed. These are supporting observations, not decoded QR, PDF417, MRZ, or personal data.
+Possible DNI `recognitionSignals` are `printed_content`, `layout_signature`, `machine_readable_rows`, `square_dense_region`, `wide_dense_region`, and `localized_lower_right_dense_region`. With `sideValidation: "off"`, only the position-independent `printed_content` signal is exposed. `genericCard` returns an empty list. These are supporting observations, not decoded QR, PDF417, MRZ, or personal data.
 
 Both image locations are temporary. Copy the file to application-managed persistent storage if it must be retained.
 
@@ -324,7 +345,7 @@ Quality rejection does not produce `PROCESSING_FAILED`; the image is discarded a
 - Android always confirms a compatible quadrilateral across several frames, even when `checks.stability` is disabled. Disabling stability skips the longer hold and sensor gate; it no longer permits capture from one isolated detection.
 - Android crop integrity is mandatory: every detected side must leave enough source-image clearance for an independent outward safety margin. A capture that would clamp or lose any edge is discarded and scanning resumes.
 - Stable valid frames trigger native photo capture; the result is perspective-corrected and saved as JPEG 95 with a configurable maximum long edge (1280 px by default, capped at 2048 px). Colors are preserved without paper-scanner filters.
-- A position-independent printed-content score is returned for downstream diagnostics and never blocks capture. In `advisory` or `strict`, a compact 4×3 edge/saturation classifier also estimates side and generation; those estimates remain heuristic and variant never blocks capture.
+- In the default `dni` profile, a position-independent printed-content score is returned for downstream diagnostics and never blocks capture. In `advisory` or `strict`, a compact 4×3 edge/saturation classifier also estimates side and generation; those estimates remain heuristic and variant never blocks capture. The `genericCard` profile skips those content heuristics and applies quality thresholds suited to visually diverse ID-1 cards.
 
 The native guide changes from red to yellow to green. A subtle gray outline shows the detected quadrilateral, and one message reports the highest-priority problem. Built-in scanner messages are currently in Spanish. `debugMode` adds diagnostic categories for image quality, visual stability, and iOS device movement. Green means accepted, red means rejected, and gray means disabled, unavailable, or not yet sampling.
 
@@ -370,6 +391,7 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 
 ### Unreleased
 
+- Added `profile: "genericCard"` with `side: "any"` for credit/debit cards, driver's licenses, and other ID-1-style cards. It preserves geometry and capture-quality checks while skipping DNI layout recognition and color-based hand heuristics.
 - Reduced the full geometry hold to 500 ms and the inertial-sensor quiet window to 300 ms while retaining three-frame confirmation and capture-time motion rejection.
 - Prevented intermittent Android preview zoom after startup or auto-rotation by waiting for a stable `PreviewView` layout and explicitly restoring CameraX to `1x` before analysis resumes.
 - Added mandatory short multi-frame geometry confirmation on Android independently of the optional motion-stability check.

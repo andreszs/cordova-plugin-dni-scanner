@@ -65,10 +65,32 @@ public final class QualityEvaluatorHostTest {
             "shadows-disabled"
         );
         assertStillEdgePolicy(evaluator);
+        assertGenericCardPolicy(detection);
 
         if (args.length == 1) {
             inspectReferences(evaluator, new File(args[0]));
         }
+    }
+
+    private static void assertGenericCardPolicy(DocumentDetection detection) {
+        ScannerConfig genericConfig = ScannerConfig.forSession(
+            ScannerConfig.DEFAULT_MAX_OUTPUT_LONG_EDGE,
+            ScannerConfig.DEFAULT_GUIDE_MARGIN_PERCENT,
+            ScannerConfig.DEFAULT_CROP_PADDING_PERCENT,
+            ScanProfile.GENERIC_CARD
+        );
+        QualityEvaluator evaluator = new QualityEvaluator(genericConfig);
+        QualityMetrics brandedCard = new QualityMetrics(
+            500.0, 170f, 0.02f, 0.08f, 0.17f, 0.16f, 1f,
+            0.03f, 0.32f, 0.325f, 0.303f, 0.32f
+        );
+        AnalysisResult.State actual = evaluator.classify(detection, brandedCard);
+        if (actual != AnalysisResult.State.READY) {
+            throw new AssertionError(
+                "generic-card-colors: expected READY but got " + actual
+            );
+        }
+        System.out.println("generic-card-colors expected=READY actual=READY");
     }
 
     private static void assertStillEdgePolicy(QualityEvaluator evaluator) {

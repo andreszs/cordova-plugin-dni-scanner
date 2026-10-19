@@ -198,7 +198,9 @@ final class StillImageProcessor {
                 );
             }
 
-            RecognitionResult recognition = recognizer.recognize(corrected);
+            RecognitionResult recognition = config.profile == ScanProfile.DNI
+                ? recognizer.recognize(corrected)
+                : RecognitionResult.unknown();
 
             File parent = outputFile.getParentFile();
             if (parent != null && !parent.exists() && !parent.mkdirs()) {

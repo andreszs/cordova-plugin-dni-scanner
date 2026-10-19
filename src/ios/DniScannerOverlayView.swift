@@ -7,14 +7,22 @@ final class DNIOverlayView: UIView {
     private var debugMode = false
     private var scanOrientation = "portrait"
     private var checks: DNIChecks
+    private let profile: DNIScanProfile
 
     override class var layerClass: AnyClass { CAShapeLayer.self }
 
-    init(instruction: String, debugMode: Bool, orientation: String, checks: DNIChecks) {
+    init(
+        instruction: String,
+        debugMode: Bool,
+        orientation: String,
+        checks: DNIChecks,
+        profile: DNIScanProfile
+    ) {
         self.instruction = instruction
         self.debugMode = debugMode
         self.scanOrientation = orientation
         self.checks = checks
+        self.profile = profile
         super.init(frame: .zero)
         isOpaque = false
         backgroundColor = .clear
@@ -142,10 +150,12 @@ final class DNIOverlayView: UIView {
             && quality.brightness <= DNIEngine.maximumBrightness
             && quality.darkClipping <= DNIEngine.maximumDarkClipping
             && quality.highlightClipping <= DNIEngine.maximumHighlightClipping
-        let shadowAcceptable = quality.illuminationSpread <= DNIEngine.maximumIlluminationSpread
-            || quality.shadowBoundary <= DNIEngine.maximumShadowBoundary
+        let shadowAcceptable = quality.illuminationSpread
+                <= DNIEngine.maximumIlluminationSpread(for: profile)
+            || quality.shadowBoundary <= DNIEngine.maximumShadowBoundary(for: profile)
         let borderAcceptable = quality.edgeGap <= DNIEngine.maximumEdgeObstruction
-            && quality.edgeObstruction <= DNIEngine.maximumEdgeObstruction
+            && (profile == .genericCard
+                || quality.edgeObstruction <= DNIEngine.maximumEdgeObstruction)
         let skinAcceptable = quality.skinEdgeObstruction <= DNIEngine.maximumEdgeObstruction
         let visuallyStable = current.stableFrameCount >= DNIEngine.requiredStableFrames
             && current.stableDurationMs >= DNIEngine.requiredStableDurationMs
@@ -185,7 +195,7 @@ final class DNIOverlayView: UIView {
             ),
             DebugRow(
                 text: String(format: "glare %.3f", quality.glare),
-                acceptable: quality.glare <= DNIEngine.maximumGlare,
+                acceptable: quality.glare <= DNIEngine.maximumGlare(for: profile),
                 enabled: checks.glare
             ),
             DebugRow(
@@ -208,8 +218,8 @@ final class DNIOverlayView: UIView {
             ),
             DebugRow(
                 text: String(format: "piel cruza %.3f", quality.skinEdgeObstruction),
-                acceptable: skinAcceptable,
-                enabled: checks.edgeOcclusion
+                acceptable: profile == .genericCard || skinAcceptable,
+                enabled: checks.edgeOcclusion && profile == .dni
             ),
             DebugRow(
                 text: String(

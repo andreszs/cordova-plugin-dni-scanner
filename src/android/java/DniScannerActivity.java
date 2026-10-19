@@ -77,6 +77,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     private FrameAnalyzer frameAnalyzer;
     private DetectionRegion detectionRegion;
     private DeviceMotionMonitor motionMonitor;
+    private ScanProfile scanProfile;
     private String requestedSide;
     private SideValidationMode sideValidation;
     private String imageWebBaseUrl;
@@ -112,6 +113,10 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
 
         try {
             JSONObject options = new JSONObject(getIntent().getStringExtra(EXTRA_OPTIONS_JSON));
+            scanProfile = ScanProfile.fromValue(options.optString("profile", "dni"));
+            if (scanProfile == null) {
+                throw new IllegalArgumentException("Invalid scan profile");
+            }
             requestedSide = options.getString("side");
             sideValidation = SideValidationMode.fromValue(
                 options.optString("sideValidation", "off")
@@ -128,7 +133,8 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
                 (float) options.optDouble(
                     "cropPaddingPercent",
                     ScannerConfig.DEFAULT_CROP_PADDING_PERCENT
-                )
+                ),
+                scanProfile
             );
             flashMode = options.optString("flashMode", "off");
             scanOrientation = options.optString("orientation", "portrait");
@@ -249,6 +255,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
 
         overlayView = new ScannerOverlayView(this);
         overlayView.setInstructionText(instructionText);
+        overlayView.setScannerConfiguration(config);
         overlayView.setDebugConfiguration(debugMode, checks);
         overlayView.update(null, 0, 0, "Buscando documento");
         root.addView(overlayView, new FrameLayout.LayoutParams(
@@ -686,7 +693,8 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             );
             StillImageProcessor.Result result = processor.process(rawFile, finalFile);
             RecognitionResult recognition = result.recognition;
-            if (sideValidation == SideValidationMode.STRICT
+            if (scanProfile == ScanProfile.DNI
+                && sideValidation == SideValidationMode.STRICT
                 && !recognition.matchesRequestedSide(requestedSide)) {
                 finalFile.delete();
                 boolean frontRequested = "front".equals(requestedSide);
@@ -838,7 +846,8 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     private JSONObject buildResult(StillImageProcessor.Result result) throws JSONException {
         RecognitionResult recognition = result.recognition;
         QualityMetrics quality = result.quality;
-        boolean exposeSide = sideValidation != SideValidationMode.OFF;
+        boolean exposeSide = scanProfile == ScanProfile.DNI
+            && sideValidation != SideValidationMode.OFF;
         String detectedSide = exposeSide ? recognition.side : "unknown";
         Integer detectedVariant = exposeSide ? recognition.variant : null;
         float sideConfidence = exposeSide ? recognition.sideConfidence : 0f;
@@ -898,6 +907,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             : imageWebBaseUrl + result.file.getName();
         json.put("imageUri", imageUri);
         json.put("imagePath", result.file.getAbsolutePath());
+        json.put("profile", scanProfile.value);
         json.put("requestedSide", requestedSide);
         json.put("sideValidation", sideValidation.value);
         json.put("detectedSide", detectedSide);
@@ -995,9 +1005,13 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             && quality.shadowBoundary > config.maxShadowBoundary * 0.65f) {
             warnings.put("uneven_lighting");
         }
-        if (quality.edgeGapFraction > config.maxEdgeGapFraction * 0.75f
-            || quality.warmEdgeRunFraction > config.maxWarmEdgeRunFraction * 0.75f
-            || quality.skinEdgeRunFraction > config.maxStillSkinEdgeRunFraction * 0.75f) {
+        boolean edgeWarning = quality.edgeGapFraction > config.maxEdgeGapFraction * 0.75f;
+        if (scanProfile == ScanProfile.DNI) {
+            edgeWarning = edgeWarning
+                || quality.warmEdgeRunFraction > config.maxWarmEdgeRunFraction * 0.75f
+                || quality.skinEdgeRunFraction > config.maxStillSkinEdgeRunFraction * 0.75f;
+        }
+        if (edgeWarning) {
             warnings.put("edge_obstruction");
         }
         return warnings;

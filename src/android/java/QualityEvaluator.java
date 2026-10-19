@@ -171,12 +171,18 @@ final class QualityEvaluator {
     }
 
     boolean hasEdgeOcclusion(QualityMetrics quality) {
+        if (config.profile == ScanProfile.GENERIC_CARD) {
+            return quality.edgeGapFraction > config.maxEdgeGapFraction;
+        }
         return quality.edgeGapFraction > config.maxEdgeGapFraction
             || quality.warmEdgeRunFraction > config.maxWarmEdgeRunFraction
             || hasPreviewSkinEdgeOcclusion(quality);
     }
 
     boolean hasStillEdgeOcclusion(QualityMetrics quality) {
+        if (config.profile == ScanProfile.GENERIC_CARD) {
+            return quality.edgeGapFraction > config.maxEdgeGapFraction;
+        }
         return quality.edgeGapFraction > config.maxEdgeGapFraction
             || quality.warmEdgeRunFraction > config.maxWarmEdgeRunFraction
             || hasStillSkinEdgeOcclusion(quality);

@@ -219,11 +219,24 @@ final class DNIEngine {
     private let imageFactory = DNIImageFactory.shared
     private let geometricDetector = DNIGeometricDocumentDetector()
 
+    static func maximumGlare(for profile: DNIScanProfile) -> Double {
+        return profile == .genericCard ? 0.23 : maximumGlare
+    }
+
+    static func maximumIlluminationSpread(for profile: DNIScanProfile) -> Double {
+        return profile == .genericCard ? 0.45 : maximumIlluminationSpread
+    }
+
+    static func maximumShadowBoundary(for profile: DNIScanProfile) -> Double {
+        return profile == .genericCard ? 0.36 : maximumShadowBoundary
+    }
+
     func analyze(
         raster: DNIRaster,
         checks: DNIChecks,
         allowedRegion: CGRect,
-        guideMarginPercent: CGFloat
+        guideMarginPercent: CGFloat,
+        profile: DNIScanProfile = .dni
     ) throws -> DNIAnalysis {
         guard let detection = try detect(
             raster: raster,
@@ -239,7 +252,12 @@ final class DNIEngine {
             )
         }
         let quality = evaluate(raster: raster, quad: detection.quad)
-        let state = classify(detection: detection, quality: quality, checks: checks)
+        let state = classify(
+            detection: detection,
+            quality: quality,
+            checks: checks,
+            profile: profile
+        )
         return DNIAnalysis(
             state: state,
             detection: detection,
@@ -402,7 +420,12 @@ final class DNIEngine {
         )
     }
 
-    func classify(detection: DNIDetection, quality: DNIQuality, checks: DNIChecks) -> DNIAnalysisState {
+    func classify(
+        detection: DNIDetection,
+        quality: DNIQuality,
+        checks: DNIChecks,
+        profile: DNIScanProfile = .dni
+    ) -> DNIAnalysisState {
         if checks.documentSize && detection.areaFraction < Self.minimumDocumentArea { return .moveCloser }
         if checks.documentSize && detection.areaFraction > Self.maximumDocumentArea { return .moveAway }
         if checks.centering && detection.centerOffset > Self.maximumCenterOffset { return .centerDocument }
@@ -413,11 +436,16 @@ final class DNIEngine {
         if checks.brightness && (quality.brightness > Self.maximumBrightness || quality.highlightClipping > Self.maximumHighlightClipping) {
             return .reduceLighting
         }
-        if checks.glare && quality.glare > Self.maximumGlare { return .avoidGlare }
-        if checks.shadows && quality.illuminationSpread > Self.maximumIlluminationSpread && quality.shadowBoundary > Self.maximumShadowBoundary {
+        if checks.glare && quality.glare > Self.maximumGlare(for: profile) { return .avoidGlare }
+        if checks.shadows
+            && quality.illuminationSpread > Self.maximumIlluminationSpread(for: profile)
+            && quality.shadowBoundary > Self.maximumShadowBoundary(for: profile) {
             return .unevenLighting
         }
-        if checks.edgeOcclusion && max(quality.edgeGap, max(quality.edgeObstruction, quality.skinEdgeObstruction)) > Self.maximumEdgeObstruction {
+        let edgeObstruction = profile == .genericCard
+            ? quality.edgeGap
+            : max(quality.edgeGap, max(quality.edgeObstruction, quality.skinEdgeObstruction))
+        if checks.edgeOcclusion && edgeObstruction > Self.maximumEdgeObstruction {
             return .edgeOccluded
         }
         if checks.sharpness && quality.sharpness < Self.minimumSharpness { return .waitingForFocus }
@@ -582,7 +610,12 @@ final class DNIStillProcessor {
             throw DNIError.retry("No se pudieron confirmar los cuatro bordes en la fotografía.", .searching)
         }
         let preQuality = engine.evaluate(raster: source, quad: detection.quad)
-        let preState = engine.classify(detection: detection, quality: preQuality, checks: options.checks)
+        let preState = engine.classify(
+            detection: detection,
+            quality: preQuality,
+            checks: options.checks,
+            profile: options.profile
+        )
         if preState != .ready && preState != .moveCloser && preState != .moveAway && preState != .centerDocument {
             throw DNIError.retry("La fotografía final no alcanzó la calidad mínima.", preState)
         }
@@ -611,12 +644,22 @@ final class DNIStillProcessor {
             centerOffset: 0,
             observedAspect: DNIEngine.expectedAspect
         )
-        let outputState = engine.classify(detection: outputDetection, quality: quality, checks: outputOnlyChecks(options.checks))
+        let outputState = engine.classify(
+            detection: outputDetection,
+            quality: quality,
+            checks: outputOnlyChecks(options.checks),
+            profile: options.profile
+        )
         if outputState != .ready {
             throw DNIError.retry("La imagen corregida no alcanzó la calidad mínima.", outputState)
         }
 
-        let recognition = try recognizer.recognize(raster: corrected)
+        let recognition: DNIRecognition
+        if options.profile == .dni {
+            recognition = try recognizer.recognize(raster: corrected)
+        } else {
+            recognition = .unknown
+        }
         let fileURL = directory.appendingPathComponent("dni-\(UUID().uuidString.lowercased()).jpg")
         guard let jpeg = UIImage(cgImage: correctedCG).jpegData(compressionQuality: 0.95) else {
             throw DNIError.processingFailed("No se pudo codificar el JPEG corregido.", false)

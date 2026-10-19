@@ -364,6 +364,26 @@ enum SideValidationMode {
     }
 }
 
+enum ScanProfile {
+    DNI("dni"),
+    GENERIC_CARD("genericCard");
+
+    final String value;
+
+    ScanProfile(String value) {
+        this.value = value;
+    }
+
+    static ScanProfile fromValue(String value) {
+        for (ScanProfile profile : values()) {
+            if (profile.value.equals(value)) {
+                return profile;
+            }
+        }
+        return null;
+    }
+}
+
 final class AnalysisResult {
     enum Source {
         PREVIEW,
@@ -445,6 +465,18 @@ final class RecognitionResult {
 
     boolean matchesRequestedSide(String requestedSide) {
         return requestedSide != null && requestedSide.equals(side);
+    }
+
+    static RecognitionResult unknown() {
+        return new RecognitionResult(
+            "unknown",
+            null,
+            0f,
+            0f,
+            0,
+            java.util.Collections.emptyList(),
+            0f
+        );
     }
 
 }

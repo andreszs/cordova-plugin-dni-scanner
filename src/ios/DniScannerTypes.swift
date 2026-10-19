@@ -119,10 +119,16 @@ enum DNISideValidationMode: String {
     case strict
 }
 
+enum DNIScanProfile: String {
+    case dni
+    case genericCard
+}
+
 struct DNIOptions {
     static let minimumOutputLongEdge = 640
     static let maximumOutputLongEdge = 2048
 
+    let profile: DNIScanProfile
     let side: String
     let sideValidation: DNISideValidationMode
     let flashMode: String
@@ -137,14 +143,27 @@ struct DNIOptions {
     let checks: DNIChecks
 
     init(dictionary: [String: Any]) throws {
-        guard let side = dictionary["side"] as? String, side == "front" || side == "back" else {
-            throw DNIError.invalidArgument("La opción side debe ser 'front' o 'back'.")
+        let rawProfile = dictionary["profile"] as? String ?? "dni"
+        guard let profile = DNIScanProfile(rawValue: rawProfile) else {
+            throw DNIError.invalidArgument("La opción profile debe ser 'dni' o 'genericCard'.")
+        }
+        guard let side = dictionary["side"] as? String else {
+            throw DNIError.invalidArgument("La opción side es obligatoria.")
+        }
+        if profile == .dni && side != "front" && side != "back" {
+            throw DNIError.invalidArgument("Para profile='dni', side debe ser 'front' o 'back'.")
+        }
+        if profile == .genericCard && side != "any" {
+            throw DNIError.invalidArgument("Para profile='genericCard', side debe ser 'any'.")
         }
         let rawSideValidation = dictionary["sideValidation"] as? String ?? "off"
         guard let sideValidation = DNISideValidationMode(rawValue: rawSideValidation) else {
             throw DNIError.invalidArgument(
                 "La opción sideValidation debe ser 'off', 'advisory' o 'strict'."
             )
+        }
+        if profile == .genericCard && sideValidation != .off {
+            throw DNIError.invalidArgument("Para profile='genericCard', sideValidation debe ser 'off'.")
         }
         if let autoCapture = dictionary["autoCapture"] {
             guard let enabled = autoCapture as? Bool, enabled else {
@@ -211,6 +230,7 @@ struct DNIOptions {
             checksDictionary = nil
         }
 
+        self.profile = profile
         self.side = side
         self.sideValidation = sideValidation
         self.flashMode = flashMode
@@ -377,6 +397,15 @@ struct DNIRecognition {
     let variantConfidence: Double
     let signals: [String]
     let contentScore: Double
+
+    static let unknown = DNIRecognition(
+        side: "unknown",
+        variant: nil,
+        sideConfidence: 0,
+        variantConfidence: 0,
+        signals: [],
+        contentScore: 0
+    )
 }
 
 enum DNIAnalysisState: String {

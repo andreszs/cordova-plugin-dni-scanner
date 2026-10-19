@@ -110,7 +110,7 @@ final class DniScanner: CDVPlugin {
     ) -> [String: Any] {
         let recognition = scan.recognition
         let documentConfidence = Double(scan.detection.score)
-        let exposeSide = options.sideValidation != .off
+        let exposeSide = options.profile == .dni && options.sideValidation != .off
         let detectedSide = exposeSide ? recognition.side : "unknown"
         let sideConfidence = exposeSide ? recognition.sideConfidence : 0
         let variantConfidence = exposeSide ? recognition.variantConfidence : 0
@@ -133,6 +133,7 @@ final class DniScanner: CDVPlugin {
             "status": "success",
             "imageUri": imageWebURL(fileName: scan.fileURL.lastPathComponent),
             "imagePath": scan.fileURL.path,
+            "profile": options.profile.rawValue,
             "requestedSide": options.side,
             "sideValidation": options.sideValidation.rawValue,
             "detectedSide": detectedSide,
@@ -141,7 +142,7 @@ final class DniScanner: CDVPlugin {
             "documentCandidate": true,
             "usableForOcr": usable,
             "contentScore": round(recognition.contentScore),
-            "qualityWarnings": qualityWarnings(scan.quality),
+            "qualityWarnings": qualityWarnings(scan.quality, profile: options.profile),
             "confidence": [
                 "document": round(documentConfidence),
                 "content": round(recognition.contentScore),
@@ -178,7 +179,7 @@ final class DniScanner: CDVPlugin {
             && quality.glare <= DNIEngine.maximumOCRGlare
     }
 
-    private func qualityWarnings(_ quality: DNIQuality) -> [String] {
+    private func qualityWarnings(_ quality: DNIQuality, profile: DNIScanProfile) -> [String] {
         var warnings: [String] = []
         if quality.sharpness < DNIEngine.minimumSharpness * 1.35 {
             warnings.append("low_sharpness")
@@ -191,15 +192,19 @@ final class DniScanner: CDVPlugin {
             || quality.highlightClipping > DNIEngine.maximumHighlightClipping * 0.75 {
             warnings.append("high_light")
         }
-        if quality.glare > DNIEngine.maximumGlare * 0.65 {
+        if quality.glare > DNIEngine.maximumGlare(for: profile) * 0.65 {
             warnings.append("glare")
         }
-        if quality.illuminationSpread > DNIEngine.maximumIlluminationSpread * 0.75
-            && quality.shadowBoundary > DNIEngine.maximumShadowBoundary * 0.65 {
+        if quality.illuminationSpread
+                > DNIEngine.maximumIlluminationSpread(for: profile) * 0.75
+            && quality.shadowBoundary
+                > DNIEngine.maximumShadowBoundary(for: profile) * 0.65 {
             warnings.append("uneven_lighting")
         }
-        if max(quality.edgeGap, max(quality.edgeObstruction, quality.skinEdgeObstruction))
-            > DNIEngine.maximumEdgeObstruction * 0.75 {
+        let edgeObstruction = profile == .genericCard
+            ? quality.edgeGap
+            : max(quality.edgeGap, max(quality.edgeObstruction, quality.skinEdgeObstruction))
+        if edgeObstruction > DNIEngine.maximumEdgeObstruction * 0.75 {
             warnings.append("edge_obstruction")
         }
         return warnings

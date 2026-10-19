@@ -60,13 +60,23 @@ public final class DniScannerPlugin extends CordovaPlugin {
     }
 
     private String validateOptions(JSONObject options) {
+        ScanProfile profile = ScanProfile.fromValue(options.optString("profile", "dni"));
+        if (profile == null) {
+            return "La opción profile debe ser 'dni' o 'genericCard'.";
+        }
         String side = options.optString("side", "");
-        if (!("front".equals(side) || "back".equals(side))) {
-            return "La opción side debe ser 'front' o 'back'.";
+        if (profile == ScanProfile.DNI && !("front".equals(side) || "back".equals(side))) {
+            return "Para profile='dni', side debe ser 'front' o 'back'.";
+        }
+        if (profile == ScanProfile.GENERIC_CARD && !"any".equals(side)) {
+            return "Para profile='genericCard', side debe ser 'any'.";
         }
         String sideValidation = options.optString("sideValidation", "off");
         if (SideValidationMode.fromValue(sideValidation) == null) {
             return "La opción sideValidation debe ser 'off', 'advisory' o 'strict'.";
+        }
+        if (profile == ScanProfile.GENERIC_CARD && !"off".equals(sideValidation)) {
+            return "Para profile='genericCard', sideValidation debe ser 'off'.";
         }
         if (options.has("autoCapture") && !options.optBoolean("autoCapture", true)) {
             return "La versión actual sólo admite autoCapture=true.";

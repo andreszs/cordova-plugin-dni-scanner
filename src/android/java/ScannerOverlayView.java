@@ -23,7 +23,8 @@ final class ScannerOverlayView extends View {
     private final Paint debugPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint debugBackgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
-    private final QualityEvaluator qualityEvaluator = new QualityEvaluator(ScannerConfig.DEFAULT);
+    private ScannerConfig scannerConfig = ScannerConfig.DEFAULT;
+    private QualityEvaluator qualityEvaluator = new QualityEvaluator(scannerConfig);
     private AnalysisResult result;
     private int frameWidth;
     private int frameHeight;
@@ -75,6 +76,12 @@ final class ScannerOverlayView extends View {
 
     void setInstructionText(String instruction) {
         this.instruction = instruction == null ? "" : instruction.trim();
+        invalidate();
+    }
+
+    void setScannerConfiguration(ScannerConfig config) {
+        scannerConfig = config == null ? ScannerConfig.DEFAULT : config;
+        qualityEvaluator = new QualityEvaluator(scannerConfig);
         invalidate();
     }
 
@@ -203,29 +210,29 @@ final class ScannerOverlayView extends View {
         rows.add(new DebugRow(still ? "fuente foto" : "fuente preview", true, false));
         rows.add(new DebugRow(
             String.format(Locale.US, "area %.3f", detection.areaFraction),
-            detection.areaFraction >= ScannerConfig.DEFAULT.minDocumentArea
-                && detection.areaFraction <= ScannerConfig.DEFAULT.maxDocumentArea,
+            detection.areaFraction >= scannerConfig.minDocumentArea
+                && detection.areaFraction <= scannerConfig.maxDocumentArea,
             checks.documentSize
         ));
         rows.add(new DebugRow(
             String.format(Locale.US, "centro %.3f", detection.centerOffset),
-            detection.centerOffset <= ScannerConfig.DEFAULT.maxCenterOffset,
+            detection.centerOffset <= scannerConfig.maxCenterOffset,
             checks.centering
         ));
         rows.add(new DebugRow(
             String.format(Locale.US, "persp %.3f", quality.perspectiveScore),
-            quality.perspectiveScore >= ScannerConfig.DEFAULT.minPerspectiveScore,
+            quality.perspectiveScore >= scannerConfig.minPerspectiveScore,
             checks.perspective
         ));
         rows.add(new DebugRow(
             String.format(Locale.US, "foco %.0f", quality.sharpness),
-            quality.sharpness >= ScannerConfig.DEFAULT.minSharpnessVariance,
+            quality.sharpness >= scannerConfig.minSharpnessVariance,
             checks.sharpness
         ));
-        boolean exposureOk = quality.brightness >= ScannerConfig.DEFAULT.minBrightness
-            && quality.brightness <= ScannerConfig.DEFAULT.maxBrightness
-            && quality.darkFraction <= ScannerConfig.DEFAULT.maxDarkFraction
-            && quality.clippedFraction <= ScannerConfig.DEFAULT.maxClippedFraction;
+        boolean exposureOk = quality.brightness >= scannerConfig.minBrightness
+            && quality.brightness <= scannerConfig.maxBrightness
+            && quality.darkFraction <= scannerConfig.maxDarkFraction
+            && quality.clippedFraction <= scannerConfig.maxClippedFraction;
         rows.add(new DebugRow(
             String.format(Locale.US, "luz %.0f d%.2f c%.2f", quality.brightness,
                 quality.darkFraction, quality.clippedFraction),
@@ -235,8 +242,8 @@ final class ScannerOverlayView extends View {
         rows.add(new DebugRow(
             String.format(Locale.US, "glare %.3f/%.3f", quality.glareFraction,
                 quality.glareBlobFraction),
-            quality.glareFraction <= ScannerConfig.DEFAULT.maxGlareFraction
-                && quality.glareBlobFraction <= ScannerConfig.DEFAULT.maxGlareBlobFraction,
+            quality.glareFraction <= scannerConfig.maxGlareFraction
+                && quality.glareBlobFraction <= scannerConfig.maxGlareBlobFraction,
             checks.glare
         ));
         rows.add(new DebugRow(
@@ -245,10 +252,11 @@ final class ScannerOverlayView extends View {
             !hasUnevenLighting(quality),
             checks.shadows
         ));
+        boolean genericCard = scannerConfig.profile == ScanProfile.GENERIC_CARD;
         boolean borderSignalsAcceptable = quality.edgeGapFraction
-                <= ScannerConfig.DEFAULT.maxEdgeGapFraction
-            && quality.warmEdgeRunFraction
-                <= ScannerConfig.DEFAULT.maxWarmEdgeRunFraction;
+                <= scannerConfig.maxEdgeGapFraction
+            && (genericCard || quality.warmEdgeRunFraction
+                <= scannerConfig.maxWarmEdgeRunFraction);
         boolean skinSignalAcceptable = !hasSkinEdgeOcclusion(quality, still);
         rows.add(new DebugRow(
             String.format(Locale.US, "borde gap %.2f warm %.2f", quality.edgeGapFraction,
@@ -258,15 +266,15 @@ final class ScannerOverlayView extends View {
         ));
         rows.add(new DebugRow(
             String.format(Locale.US, "piel cruza %.3f", quality.skinEdgeRunFraction),
-            skinSignalAcceptable,
-            checks.edgeOcclusion
+            genericCard || skinSignalAcceptable,
+            checks.edgeOcclusion && !genericCard
         ));
         int requiredFrames = checks.stability
-            ? ScannerConfig.DEFAULT.stableFrames
-            : ScannerConfig.DEFAULT.geometryConfirmationFrames;
+            ? scannerConfig.stableFrames
+            : scannerConfig.geometryConfirmationFrames;
         long requiredDuration = checks.stability
-            ? ScannerConfig.DEFAULT.stableDurationMs
-            : ScannerConfig.DEFAULT.geometryConfirmationDurationMs;
+            ? scannerConfig.stableDurationMs
+            : scannerConfig.geometryConfirmationDurationMs;
         boolean stable = result.state == AnalysisResult.State.READY
             || result.state == AnalysisResult.State.CAPTURING
             || (result.stableFrameCount >= requiredFrames
@@ -305,9 +313,7 @@ final class ScannerOverlayView extends View {
     }
 
     private boolean hasUnevenLighting(QualityMetrics quality) {
-        return quality.shadowBoundary > ScannerConfig.DEFAULT.maxSevereShadowBoundary
-            || (quality.illuminationSpread > ScannerConfig.DEFAULT.maxIlluminationSpread
-                && quality.shadowBoundary > ScannerConfig.DEFAULT.maxShadowBoundary);
+        return qualityEvaluator.hasUnevenLighting(quality);
     }
 
     private boolean hasSkinEdgeOcclusion(QualityMetrics quality, boolean still) {

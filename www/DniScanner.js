@@ -21,9 +21,10 @@ function normalizeError(error) {
 }
 
 /**
- * Opens the native automatic DNI scanner.
+ * Opens the native automatic DNI or generic ID-1 card scanner.
  *
- * @param {{side: ('front'|'back'), autoCapture?: boolean,
+ * @param {{profile?: ('dni'|'genericCard'), side: ('front'|'back'|'any'),
+ *          autoCapture?: boolean,
  *          sideValidation?: ('off'|'advisory'|'strict'),
  *          flashMode?: ('off'|'auto'|'on'), showCloseButton?: boolean,
  *          showFlashButton?: boolean, debugMode?: boolean,
