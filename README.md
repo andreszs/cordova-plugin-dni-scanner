@@ -113,6 +113,7 @@ const result = await DniScanner.scan({
     showCloseButton: true,
     showFlashButton: false,
     debugMode: false,
+    beepEnabled: true,
     maxOutputLongEdge: 1280,
     instructionText: "Ubicá el frente del DNI en el recuadro",
     checks: {
@@ -162,6 +163,7 @@ obstructions.
 | `showCloseButton` | `boolean` | `true` | Shows the native close button. Android Back still cancels when hidden. |
 | `showFlashButton` | `boolean` | `true` | Shows the flash selector when the device has a flash unit. |
 | `debugMode` | `boolean` | `true` | Shows live metrics over the camera. Enabled checks are green inside their threshold and red outside it; disabled checks are gray. It does not change validation. |
+| `beepEnabled` | `boolean` | `true` | Plays a short synthesized confirmation beep after a successful capture. Device silent mode is respected. |
 | `maxOutputLongEdge` | integer `640–2048` | `1280` | Maximum long edge of the corrected JPEG. The actual image may be smaller when the capture contains fewer effective pixels. |
 | `instructionText` | `string \| null` | `""` | Optional text above the guide. Missing, empty, or `null` hides it. |
 | `checks` | `object \| null` | standard checks enabled | Enables or disables individual acceptance checks. Missing properties stay enabled. |
@@ -386,6 +388,10 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 `tests/host` contains deterministic Android tests for geometry, stability, image quality, perspective correction, edge obstruction, and layout classification. `tests/ios` exercises motion fallback, startup, rotation, acceleration, quiet recovery, capture-time movement, and stale samples without Core Motion hardware. The iOS sources are compiled in both simulator and device configurations through the Cordova demo. Reference DNI images are intentionally excluded from the repository and npm package. A physical-device scan remains required before a production release.
 
 ## Changelog
+
+### Unreleased
+
+- Added the optional `beepEnabled` confirmation sound, enabled by default on Android and iOS and suppressed when the device is in silent mode.
 
 ### 0.2.1
 

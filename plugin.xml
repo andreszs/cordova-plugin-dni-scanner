@@ -44,6 +44,7 @@
 
         <source-file src="src/android/java/DniScannerPlugin.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/DniScannerActivity.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/DniScannerSuccessBeep.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/ScannerConfig.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/MotionStabilityTracker.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/DeviceMotionMonitor.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
@@ -72,6 +73,7 @@
         <source-file src="src/ios/DniMotionStability.swift" />
         <source-file src="src/ios/DniMotionMonitor.swift" />
         <source-file src="src/ios/DniScannerTypes.swift" />
+        <source-file src="src/ios/DniScannerSuccessBeep.swift" />
         <source-file src="src/ios/DniScannerEngine.swift" />
         <source-file src="src/ios/DniGeometricDocumentDetector.swift" />
         <source-file src="src/ios/DniScannerRecognizer.swift" />

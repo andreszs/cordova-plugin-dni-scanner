@@ -100,6 +100,9 @@ public final class DniScannerPlugin extends CordovaPlugin {
         if (!isBooleanOption(options, "debugMode")) {
             return "La opción debugMode debe ser booleana.";
         }
+        if (!isBooleanOption(options, "beepEnabled")) {
+            return "La opción beepEnabled debe ser booleana.";
+        }
         if (options.has("maxOutputLongEdge")) {
             Object rawMaximum = options.opt("maxOutputLongEdge");
             if (!(rawMaximum instanceof Number)) {

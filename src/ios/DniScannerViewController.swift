@@ -16,6 +16,7 @@ final class DNIViewController: UIViewController {
     weak var delegate: DNIViewControllerDelegate?
 
     private let options: DNIOptions
+    private let successBeep = DniScannerSuccessBeep()
     private let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "com.crediser.dniscanner.ios.session")
     private let analysisQueue = DispatchQueue(label: "com.crediser.dniscanner.ios.analysis", qos: .userInitiated)
@@ -647,7 +648,20 @@ final class DNIViewController: UIViewController {
         setTorch(enabled: false)
         let motion = acceptedMotionSnapshot ?? motionMonitor.snapshot()
         motionMonitor.stop()
-        delegate?.dniScanner(self, didFinish: scan, flashFired: flashFired, motion: motion)
+        if options.beepEnabled {
+            successBeep.play()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                guard let self = self else { return }
+                self.delegate?.dniScanner(
+                    self,
+                    didFinish: scan,
+                    flashFired: flashFired,
+                    motion: motion
+                )
+            }
+        } else {
+            delegate?.dniScanner(self, didFinish: scan, flashFired: flashFired, motion: motion)
+        }
     }
 
     private func fail(_ error: DNIError) {

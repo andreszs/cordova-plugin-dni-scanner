@@ -54,6 +54,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class DniScannerActivity extends Activity implements LifecycleOwner, FrameAnalyzer.Listener {
+    private static final long SUCCESS_BEEP_DELAY_MS = 250L;
+
     public static final String EXTRA_OPTIONS_JSON = "dniScanner.options";
     public static final String EXTRA_IMAGE_WEB_BASE_URL = "dniScanner.imageWebBaseUrl";
     public static final String EXTRA_RESULT_JSON = "dniScanner.result";
@@ -88,6 +90,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     private boolean showCloseButton;
     private boolean showFlashButton;
     private boolean debugMode;
+    private boolean beepEnabled;
     private long timeoutMs;
     private boolean capturing;
     private boolean completed;
@@ -100,6 +103,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     private long captureMotionSequence;
     private MotionSnapshot capturedMotion;
     private String capturedOrientation;
+    private DniScannerSuccessBeep successBeep;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -137,9 +141,11 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             showCloseButton = options.optBoolean("showCloseButton", true);
             showFlashButton = options.optBoolean("showFlashButton", true);
             debugMode = options.optBoolean("debugMode", true);
+            beepEnabled = options.optBoolean("beepEnabled", true);
             timeoutMs = options.optLong("timeoutMs", 0L);
             imageWebBaseUrl = getIntent().getStringExtra(EXTRA_IMAGE_WEB_BASE_URL);
             motionMonitor = new DeviceMotionMonitor(this, config);
+            successBeep = new DniScannerSuccessBeep(this, mainHandler);
         } catch (Exception error) {
             finishWithError("INVALID_ARGUMENT", "Opciones de captura inválidas.", false);
             return;
@@ -221,6 +227,9 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         }
         if (motionMonitor != null) {
             motionMonitor.stop();
+        }
+        if (successBeep != null) {
+            successBeep.close();
         }
         analysisExecutor.shutdownNow();
         captureExecutor.shutdownNow();
@@ -1119,8 +1128,16 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         completed = true;
         Intent data = new Intent();
         data.putExtra(EXTRA_RESULT_JSON, result.toString());
-        setResult(RESULT_OK, data);
-        finish();
+        if (beepEnabled && successBeep != null) {
+            successBeep.play();
+            mainHandler.postDelayed(() -> {
+                setResult(RESULT_OK, data);
+                finish();
+            }, SUCCESS_BEEP_DELAY_MS);
+        } else {
+            setResult(RESULT_OK, data);
+            finish();
+        }
     }
 
     private void finishWithErrorOnMain(String code, String message, boolean recoverable) {

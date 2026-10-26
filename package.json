@@ -3,6 +3,15 @@
   "version": "0.2.1",
   "description": "Offline automatic capture and perspective correction for Argentine DNI cards on Android and iOS.",
   "license": "Apache-2.0",
+  "author": "Andres Zs",
+  "homepage": "https://github.com/andreszs/cordova-plugin-dni-scanner",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/andreszs/cordova-plugin-dni-scanner.git"
+  },
+  "bugs": {
+    "url": "https://github.com/andreszs/cordova-plugin-dni-scanner/issues"
+  },
   "keywords": [
     "cordova",
     "android",
@@ -34,5 +43,12 @@
     "src",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "test": "node tests/success-beep.test.js"
+  }
 }

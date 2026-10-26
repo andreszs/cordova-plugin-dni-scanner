@@ -136,6 +136,7 @@ struct DNIOptions {
     let showCloseButton: Bool
     let showFlashButton: Bool
     let debugMode: Bool
+    let beepEnabled: Bool
     let maxOutputLongEdge: Int
     let instructionText: String
     let timeoutMs: Int
@@ -231,6 +232,7 @@ struct DNIOptions {
         self.showCloseButton = try strictBool("showCloseButton", fallback: true)
         self.showFlashButton = try strictBool("showFlashButton", fallback: true)
         self.debugMode = try strictBool("debugMode", fallback: true)
+        self.beepEnabled = try strictBool("beepEnabled", fallback: true)
         self.maxOutputLongEdge = output
         self.instructionText = instruction
         self.timeoutMs = timeout
