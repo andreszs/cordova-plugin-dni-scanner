@@ -363,7 +363,7 @@ The default `sideValidation: "off"` prioritizes capture recall: printing offsets
 | AndroidX WebKit | supplied by Cordova | Apache-2.0 | Serves the private JPEG to the WebView; declared `compileOnly`. |
 | Apple AVFoundation / Core Motion / Core Image / Vision / WebKit | iOS system | Apple SDK | Camera, motion stability, rectangle detection, perspective correction, and private JPEG delivery. |
 
-The unused CameraX video stack is excluded. The plugin contains no ML models, native computer-vision libraries, or remote-service SDKs. Plugin source is licensed under Apache-2.0; see [LICENSE](LICENSE).
+The unused CameraX video stack is excluded. The plugin contains no ML models, native computer-vision libraries, or remote-service SDKs. Plugin source is licensed under MIT; see [LICENSE](LICENSE).
 
 ## Privacy
 
@@ -388,6 +388,10 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 `tests/host` contains deterministic Android tests for geometry, stability, image quality, perspective correction, edge obstruction, and layout classification. `tests/ios` exercises motion fallback, startup, rotation, acceleration, quiet recovery, capture-time movement, and stale samples without Core Motion hardware. The iOS sources are compiled in both simulator and device configurations through the Cordova demo. Reference DNI images are intentionally excluded from the repository and npm package. A physical-device scan remains required before a production release.
 
 ## Changelog
+
+### 0.2.3
+
+- Relicensed the plugin source under the MIT License. Releases through 0.2.2 remain available under Apache-2.0.
 
 ### 0.2.2
 

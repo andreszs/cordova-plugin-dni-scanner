@@ -2,10 +2,10 @@
 <plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
         xmlns:android="http://schemas.android.com/apk/res/android"
         id="cordova-plugin-dni-scanner"
-        version="0.2.2">
+        version="0.2.3">
     <name>DNI Scanner</name>
     <description>Offline automatic DNI capture and perspective correction for Android and iOS.</description>
-    <license>Apache-2.0</license>
+    <license>MIT</license>
     <keywords>cordova,android,ios,dni,document,camera,camerax,avfoundation</keywords>
 
     <engines>
