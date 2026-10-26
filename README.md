@@ -389,7 +389,7 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 
 ## Changelog
 
-### Unreleased
+### 0.2.2
 
 - Added the optional `beepEnabled` confirmation sound, enabled by default on Android and iOS and suppressed when the device is in silent mode.
 
