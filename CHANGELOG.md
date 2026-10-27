@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.5 - 2026-10-27
+
 - Added backward-compatible `minEffectiveDocumentLongEdge` (disabled by default) so undersized document captures are discarded and scanning resumes.
 - Added `minStillSharpnessVariance` for the corrected still photo, preserving the previous Android/iOS defaults while allowing stricter values such as 155–160; enabled low-sharpness failures now force recapture.
 - Added center-of-document AF/AE before the shutter with a bounded 700 ms fallback on Android and iOS.
