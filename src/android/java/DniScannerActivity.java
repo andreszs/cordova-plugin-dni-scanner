@@ -5,6 +5,7 @@ import android.content.res.Configuration;
 import android.content.pm.ActivityInfo;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.PointF;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -24,9 +25,12 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraSelector;
+import androidx.camera.core.FocusMeteringAction;
+import androidx.camera.core.FocusMeteringResult;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageCapture;
 import androidx.camera.core.ImageCaptureException;
+import androidx.camera.core.MeteringPoint;
 import androidx.camera.core.Preview;
 import androidx.camera.core.UseCaseGroup;
 import androidx.camera.core.ViewPort;
@@ -52,6 +56,7 @@ import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public final class DniScannerActivity extends Activity implements LifecycleOwner, FrameAnalyzer.Listener {
     private static final long SUCCESS_BEEP_DELAY_MS = 250L;
@@ -104,6 +109,8 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     private MotionSnapshot capturedMotion;
     private String capturedOrientation;
     private DniScannerSuccessBeep successBeep;
+    private int focusMeteringSequence;
+    private boolean focusMeteringPending;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -134,6 +141,14 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
                     ScannerConfig.DEFAULT_PREFERRED_CAPTURE_LONG_EDGE
                 ),
                 options.optInt("maxOutputLongEdge", ScannerConfig.DEFAULT_MAX_OUTPUT_LONG_EDGE),
+                options.optInt(
+                    "minEffectiveDocumentLongEdge",
+                    ScannerConfig.DEFAULT_MIN_EFFECTIVE_DOCUMENT_LONG_EDGE
+                ),
+                options.optDouble(
+                    "minStillSharpnessVariance",
+                    ScannerConfig.DEFAULT_MIN_STILL_SHARPNESS_VARIANCE
+                ),
                 scanProfile
             );
             flashMode = options.optString("flashMode", "off");
@@ -648,7 +663,66 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
                 "\uD83D\uDCF7 Tomando foto, no muevas el celular"
             );
         }
-        mainHandler.postDelayed(this::captureStillImage, config.captureDelayMs);
+        mainHandler.postDelayed(this::focusAndCaptureStillImage, config.captureDelayMs);
+    }
+
+    private void focusAndCaptureStillImage() {
+        if (completed || !capturing || imageCapture == null) {
+            return;
+        }
+        final int sequence = ++focusMeteringSequence;
+        focusMeteringPending = true;
+        mainHandler.postDelayed(
+            () -> completeFocusMetering(sequence),
+            config.focusMeteringTimeoutMs
+        );
+
+        if (camera == null || latestAnalysis == null || latestAnalysis.detection == null
+            || latestFrameWidth <= 0 || latestFrameHeight <= 0
+            || previewView.getWidth() <= 0 || previewView.getHeight() <= 0) {
+            return;
+        }
+
+        PointF documentCenter = latestAnalysis.detection.quad.center();
+        float scale = Math.max(
+            previewView.getWidth() / (float) latestFrameWidth,
+            previewView.getHeight() / (float) latestFrameHeight
+        );
+        float offsetX = (previewView.getWidth() - latestFrameWidth * scale) * 0.5f;
+        float offsetY = (previewView.getHeight() - latestFrameHeight * scale) * 0.5f;
+        MeteringPoint point = previewView.getMeteringPointFactory().createPoint(
+            offsetX + documentCenter.x * scale,
+            offsetY + documentCenter.y * scale,
+            0.15f
+        );
+        FocusMeteringAction action = new FocusMeteringAction.Builder(
+            point,
+            FocusMeteringAction.FLAG_AF | FocusMeteringAction.FLAG_AE
+        ).setAutoCancelDuration(2, TimeUnit.SECONDS).build();
+        try {
+            ListenableFuture<FocusMeteringResult> focus = camera.getCameraControl()
+                .startFocusAndMetering(action);
+            focus.addListener(() -> {
+                try {
+                    if (focus.get().isFocusSuccessful()) {
+                        completeFocusMetering(sequence);
+                    }
+                } catch (Exception ignored) {
+                    // The bounded timeout below is the fallback for unsupported or failed AF/AE.
+                }
+            }, ContextCompat.getMainExecutor(this));
+        } catch (Exception ignored) {
+            // The bounded timeout below is the fallback for unsupported or failed AF/AE.
+        }
+    }
+
+    private void completeFocusMetering(int sequence) {
+        if (!focusMeteringPending || sequence != focusMeteringSequence
+            || completed || !capturing) {
+            return;
+        }
+        focusMeteringPending = false;
+        captureStillImage();
     }
 
     private void captureStillImage() {
@@ -820,6 +894,8 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
                 return;
             }
             capturing = false;
+            focusMeteringPending = false;
+            focusMeteringSequence++;
             unlockAutoOrientationAfterRetry();
             overlayView.update(
                 debugMode ? diagnostic : null,
@@ -872,6 +948,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
 
         JSONObject qualityJson = new JSONObject();
         qualityJson.put("sharpness", round(sharpnessScore(quality.sharpness)));
+        qualityJson.put("sharpnessVariance", round(quality.sharpness));
         qualityJson.put("brightness", round(quality.brightness / 255f));
         qualityJson.put("glare", round(Math.max(quality.glareFraction, quality.glareBlobFraction)));
         qualityJson.put("perspective", round(quality.perspectiveScore));
@@ -936,6 +1013,8 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         json.put("effectiveDocumentLongEdge", result.effectiveDocumentLongEdge);
         json.put("preferredCaptureLongEdge", config.preferredCaptureLongEdge);
         json.put("maxOutputLongEdge", config.maxOutputLongEdge);
+        json.put("minEffectiveDocumentLongEdge", config.minEffectiveDocumentLongEdge);
+        json.put("minStillSharpnessVariance", round(config.minStillSharpnessVariance));
         json.put("mimeType", "image/jpeg");
         json.put("bytes", result.file.length());
         json.put("quality", qualityJson);
@@ -998,7 +1077,8 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
 
     private JSONArray qualityWarnings(QualityMetrics quality) {
         JSONArray warnings = new JSONArray();
-        if (quality.sharpness < config.minSharpnessVariance * 1.35) {
+        if (!checks.sharpness
+            && quality.sharpness < config.minStillSharpnessVariance) {
             warnings.put("low_sharpness");
         }
         if (quality.brightness < config.minBrightness + 18f

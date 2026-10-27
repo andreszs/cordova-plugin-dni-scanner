@@ -131,6 +131,33 @@ public final class DniScannerPlugin extends CordovaPlugin {
                 return "La opción maxOutputLongEdge debe ser un entero entre 640 y 2048.";
             }
         }
+        if (options.has("minEffectiveDocumentLongEdge")) {
+            Object rawMinimum = options.opt("minEffectiveDocumentLongEdge");
+            if (!(rawMinimum instanceof Number)) {
+                return "La opción minEffectiveDocumentLongEdge debe ser numérica.";
+            }
+            double minimum = ((Number) rawMinimum).doubleValue();
+            if (Double.isNaN(minimum)
+                || Double.isInfinite(minimum)
+                || minimum != Math.rint(minimum)
+                || minimum < ScannerConfig.MIN_EFFECTIVE_DOCUMENT_LONG_EDGE
+                || minimum > ScannerConfig.MAX_EFFECTIVE_DOCUMENT_LONG_EDGE) {
+                return "La opción minEffectiveDocumentLongEdge debe ser un entero entre 0 y 4096.";
+            }
+        }
+        if (options.has("minStillSharpnessVariance")) {
+            Object rawMinimum = options.opt("minStillSharpnessVariance");
+            if (!(rawMinimum instanceof Number)) {
+                return "La opción minStillSharpnessVariance debe ser numérica.";
+            }
+            double minimum = ((Number) rawMinimum).doubleValue();
+            if (Double.isNaN(minimum)
+                || Double.isInfinite(minimum)
+                || minimum < ScannerConfig.MIN_STILL_SHARPNESS_VARIANCE
+                || minimum > ScannerConfig.MAX_STILL_SHARPNESS_VARIANCE) {
+                return "La opción minStillSharpnessVariance debe estar entre 1 y 10000.";
+            }
+        }
         if (options.has("instructionText")
             && !options.isNull("instructionText")
             && !(options.opt("instructionText") instanceof String)) {

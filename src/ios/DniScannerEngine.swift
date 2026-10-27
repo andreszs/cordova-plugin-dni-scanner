@@ -653,6 +653,12 @@ final class DNIStillProcessor {
             (rawQuad.topWidth + rawQuad.bottomWidth) * 0.5,
             (rawQuad.leftHeight + rawQuad.rightHeight) * 0.5 * DNIEngine.expectedAspect
         ).rounded())
+        guard effectiveDocumentLongEdge >= options.minEffectiveDocumentLongEdge else {
+            throw DNIError.retry(
+                "La fotografía no alcanzó la resolución efectiva mínima.",
+                .moveCloser
+            )
+        }
 
         let correctedCG = try factory.correctedImage(
             from: source,
@@ -686,6 +692,13 @@ final class DNIStillProcessor {
         )
         if outputState != .ready {
             throw DNIError.retry("La imagen corregida no alcanzó la calidad mínima.", outputState)
+        }
+        if options.checks.sharpness
+            && quality.sharpness < options.minStillSharpnessVariance {
+            throw DNIError.retry(
+                "La imagen corregida no alcanzó la nitidez mínima.",
+                .waitingForFocus
+            )
         }
 
         let recognition: DNIRecognition

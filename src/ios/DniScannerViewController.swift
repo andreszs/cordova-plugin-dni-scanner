@@ -49,6 +49,9 @@ final class DNIViewController: UIViewController {
     private var previewAspectRatio: CGFloat = 16 / 9
     private var normalizedGuideRegion = CGRect(x: 0.13, y: 0.12, width: 0.74, height: 0.76)
     private var acceptedMotionSnapshot: DNIMotionSnapshot?
+    private var focusMeteringSequence = 0
+    private var pendingFocusMeteringSequence: Int?
+    private let focusMeteringTimeout: TimeInterval = 0.7
 
     var effectiveFlashMode: String { currentFlashMode }
     var effectiveCaptureOrientation: String {
@@ -467,6 +470,9 @@ final class DNIViewController: UIViewController {
     private func setCapturing(_ value: Bool) {
         stateLock.lock()
         captureInProgress = value
+        if !value {
+            pendingFocusMeteringSequence = nil
+        }
         stateLock.unlock()
     }
 
@@ -531,8 +537,95 @@ final class DNIViewController: UIViewController {
         )
         overlayView.update(capturing, message: "📷 Tomando foto, no muevas el celular")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
-            self?.capturePhoto()
+            self?.focusAndMeterThenCapture(capturing)
         }
+    }
+
+    private func focusAndMeterThenCapture(_ analysis: DNIAnalysis) {
+        guard !isCompleted, isCapturing else { return }
+        stateLock.lock()
+        focusMeteringSequence += 1
+        let sequence = focusMeteringSequence
+        pendingFocusMeteringSequence = sequence
+        stateLock.unlock()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + focusMeteringTimeout) { [weak self] in
+            self?.finishFocusMetering(sequence: sequence)
+        }
+
+        guard let detection = analysis.detection,
+              analysis.imageWidth > 0, analysis.imageHeight > 0,
+              let camera = camera else { return }
+        let layerPoint = overlayView.mapToView(
+            detection.quad.center,
+            imageWidth: analysis.imageWidth,
+            imageHeight: analysis.imageHeight
+        )
+        let devicePoint = previewLayer.captureDevicePointConverted(fromLayerPoint: layerPoint)
+        let deadline = CACurrentMediaTime() + focusMeteringTimeout
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            do {
+                try camera.lockForConfiguration()
+                if camera.isFocusPointOfInterestSupported {
+                    camera.focusPointOfInterest = devicePoint
+                    if camera.isFocusModeSupported(.autoFocus) {
+                        camera.focusMode = .autoFocus
+                    }
+                }
+                if camera.isExposurePointOfInterestSupported {
+                    camera.exposurePointOfInterest = devicePoint
+                    if camera.isExposureModeSupported(.autoExpose) {
+                        camera.exposureMode = .autoExpose
+                    }
+                }
+                camera.unlockForConfiguration()
+                self.waitForFocusAndExposure(
+                    camera: camera,
+                    sequence: sequence,
+                    earliestCompletion: CACurrentMediaTime() + 0.12,
+                    deadline: deadline
+                )
+            } catch {
+                // The bounded timeout triggers capture when AF/AE cannot be configured.
+            }
+        }
+    }
+
+    private func waitForFocusAndExposure(
+        camera: AVCaptureDevice,
+        sequence: Int,
+        earliestCompletion: CFTimeInterval,
+        deadline: CFTimeInterval
+    ) {
+        let now = CACurrentMediaTime()
+        guard now < deadline else { return }
+        if now >= earliestCompletion && !camera.isAdjustingFocus && !camera.isAdjustingExposure {
+            DispatchQueue.main.async { [weak self] in
+                self?.finishFocusMetering(sequence: sequence)
+            }
+            return
+        }
+        sessionQueue.asyncAfter(deadline: .now() + 0.04) { [weak self] in
+            self?.waitForFocusAndExposure(
+                camera: camera,
+                sequence: sequence,
+                earliestCompletion: earliestCompletion,
+                deadline: deadline
+            )
+        }
+    }
+
+    private func finishFocusMetering(sequence: Int) {
+        stateLock.lock()
+        let mayCapture = pendingFocusMeteringSequence == sequence
+            && captureInProgress && !completed
+        if mayCapture {
+            pendingFocusMeteringSequence = nil
+        }
+        stateLock.unlock()
+        guard mayCapture else { return }
+        capturePhoto()
     }
 
     private func capturePhoto() {

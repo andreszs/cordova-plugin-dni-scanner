@@ -194,6 +194,26 @@ private let tests: [(String, () throws -> Void)] = [
             // Expected DNIError.invalidArgument.
         }
     }),
+    ("still resolution and sharpness thresholds are configurable", {
+        let defaults = try DNIOptions(dictionary: ["side": "front"])
+        try expect(
+            defaults.minEffectiveDocumentLongEdge == 0,
+            "effective document resolution must be opt-in by default"
+        )
+        try expect(
+            defaults.minStillSharpnessVariance == 70,
+            "the legacy iOS still sharpness default must be preserved"
+        )
+        let options = try DNIOptions(dictionary: [
+            "side": "front",
+            "preferredCaptureLongEdge": 2048,
+            "maxOutputLongEdge": 1280,
+            "minEffectiveDocumentLongEdge": 1000,
+            "minStillSharpnessVariance": 158
+        ])
+        try expect(options.minEffectiveDocumentLongEdge == 1000, "resolution threshold lost")
+        try expect(options.minStillSharpnessVariance == 158, "sharpness threshold lost")
+    }),
     ("capture resolution prefers higher before lower", {
         let candidates = [
             DNICaptureDimensions(width: 1024, height: 768),

@@ -19,6 +19,12 @@ public final class PerspectiveTransformerHostTest {
         if (ScannerConfig.DEFAULT.preferredCaptureLongEdge != 1600) {
             throw new AssertionError("The default preferred capture long edge must be 1600 px");
         }
+        if (ScannerConfig.DEFAULT.minEffectiveDocumentLongEdge != 0) {
+            throw new AssertionError("Effective document resolution must be opt-in by default");
+        }
+        if (ScannerConfig.DEFAULT.minStillSharpnessVariance != 115.0) {
+            throw new AssertionError("The legacy Android still sharpness default must be preserved");
+        }
         if (ScannerConfig.DEFAULT.cropPaddingPercent != ScannerConfig.CROP_PADDING_PERCENT) {
             throw new AssertionError("The default crop safety padding must be 3 percent");
         }
@@ -134,6 +140,21 @@ public final class PerspectiveTransformerHostTest {
         );
         if (lowResolution.getWidth() >= 640) {
             throw new AssertionError("Low-resolution captures must not be upscaled");
+        }
+
+        ScannerConfig strictStillConfig = ScannerConfig.forSession(
+            2048,
+            1280,
+            1000,
+            158.0,
+            ScanProfile.DNI
+        );
+        if (strictStillConfig.preferredCaptureLongEdge != 2048
+            || strictStillConfig.maxOutputLongEdge != 1280
+            || strictStillConfig.minEffectiveDocumentLongEdge != 1000
+            || strictStillConfig.minStillSharpnessVariance != 158.0
+            || strictStillConfig.jpegQuality != 95) {
+            throw new AssertionError("Strict still-image thresholds were not preserved");
         }
 
         assertInvalidMaximum(639);

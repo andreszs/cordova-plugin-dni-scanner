@@ -130,6 +130,12 @@ struct DNIOptions {
     static let maximumPreferredCaptureLongEdge = 2048
     static let minimumOutputLongEdge = 640
     static let maximumOutputLongEdge = 2048
+    static let minimumEffectiveDocumentLongEdge = 0
+    static let defaultMinimumEffectiveDocumentLongEdge = 0
+    static let maximumEffectiveDocumentLongEdge = 4096
+    static let minimumStillSharpnessVariance = 1.0
+    static let defaultMinimumStillSharpnessVariance = 70.0
+    static let maximumStillSharpnessVariance = 10_000.0
 
     let profile: DNIScanProfile
     let side: String
@@ -142,6 +148,8 @@ struct DNIOptions {
     let beepEnabled: Bool
     let preferredCaptureLongEdge: Int
     let maxOutputLongEdge: Int
+    let minEffectiveDocumentLongEdge: Int
+    let minStillSharpnessVariance: Double
     let instructionText: String
     let timeoutMs: Int
     let checks: DNIChecks
@@ -222,6 +230,46 @@ struct DNIOptions {
             throw DNIError.invalidArgument("La opción maxOutputLongEdge debe ser un entero entre 640 y 2048.")
         }
 
+        let effectiveNumber: NSNumber
+        if let rawMinimum = dictionary["minEffectiveDocumentLongEdge"] {
+            guard !(rawMinimum is Bool), let number = rawMinimum as? NSNumber else {
+                throw DNIError.invalidArgument(
+                    "La opción minEffectiveDocumentLongEdge debe ser numérica."
+                )
+            }
+            effectiveNumber = number
+        } else {
+            effectiveNumber = NSNumber(value: Self.defaultMinimumEffectiveDocumentLongEdge)
+        }
+        let minimumEffective = effectiveNumber.intValue
+        guard effectiveNumber.doubleValue == Double(minimumEffective),
+              minimumEffective >= Self.minimumEffectiveDocumentLongEdge,
+              minimumEffective <= Self.maximumEffectiveDocumentLongEdge else {
+            throw DNIError.invalidArgument(
+                "La opción minEffectiveDocumentLongEdge debe ser un entero entre 0 y 4096."
+            )
+        }
+
+        let sharpnessNumber: NSNumber
+        if let rawMinimum = dictionary["minStillSharpnessVariance"] {
+            guard !(rawMinimum is Bool), let number = rawMinimum as? NSNumber else {
+                throw DNIError.invalidArgument(
+                    "La opción minStillSharpnessVariance debe ser numérica."
+                )
+            }
+            sharpnessNumber = number
+        } else {
+            sharpnessNumber = NSNumber(value: Self.defaultMinimumStillSharpnessVariance)
+        }
+        let minimumStillSharpness = sharpnessNumber.doubleValue
+        guard minimumStillSharpness.isFinite,
+              minimumStillSharpness >= Self.minimumStillSharpnessVariance,
+              minimumStillSharpness <= Self.maximumStillSharpnessVariance else {
+            throw DNIError.invalidArgument(
+                "La opción minStillSharpnessVariance debe estar entre 1 y 10000."
+            )
+        }
+
         let instruction: String
         if let raw = dictionary["instructionText"], !(raw is NSNull) {
             guard let text = raw as? String else {
@@ -259,6 +307,8 @@ struct DNIOptions {
         self.beepEnabled = try strictBool("beepEnabled", fallback: true)
         self.preferredCaptureLongEdge = preferred
         self.maxOutputLongEdge = output
+        self.minEffectiveDocumentLongEdge = minimumEffective
+        self.minStillSharpnessVariance = minimumStillSharpness
         self.instructionText = instruction
         self.timeoutMs = timeout
         self.checks = try DNIChecks(dictionary: checksDictionary)
@@ -430,6 +480,7 @@ struct DNIQuality {
     var dictionary: [String: Any] {
         return [
             "sharpness": Self.round(normalizedSharpness),
+            "sharpnessVariance": Self.round(sharpness),
             "brightness": Self.round(brightness / 255.0),
             "glare": Self.round(glare),
             "perspective": Self.round(perspective),

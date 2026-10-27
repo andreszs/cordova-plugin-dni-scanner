@@ -111,8 +111,10 @@ const result = await DniScanner.scan({
     showFlashButton: false,
     debugMode: false,
     beepEnabled: true,
-    preferredCaptureLongEdge: 1600,
+    preferredCaptureLongEdge: 2048,
     maxOutputLongEdge: 1280,
+    minEffectiveDocumentLongEdge: 1000,
+    minStillSharpnessVariance: 158,
     instructionText: "Ubicá el frente del DNI en el recuadro",
     checks: {
         glare: true,
@@ -164,6 +166,8 @@ obstructions.
 | `beepEnabled` | `boolean` | `true` | Plays a short synthesized confirmation beep after a successful capture. Device silent mode is respected. |
 | `preferredCaptureLongEdge` | integer `1280–2048` | `1600` | Preferred long edge for the native camera capture. Each platform selects the closest supported size, preferring a higher resolution before falling back to a lower one. |
 | `maxOutputLongEdge` | integer `640–2048` | `1280` | Independent maximum long edge of the perspective-corrected JPEG. The plugin never enlarges a document that contains fewer effective pixels. |
+| `minEffectiveDocumentLongEdge` | integer `0–4096` | `0` | Minimum native-pixel long edge measured on the detected document. A smaller photo is discarded and capture resumes. Zero keeps the legacy behavior and disables this gate; `1000` is recommended when OCR detail matters. |
+| `minStillSharpnessVariance` | number `1–10000` | Android `115`, iOS `70` | Minimum Laplacian variance of the corrected still photo when `checks.sharpness` is enabled. Defaults preserve each platform's previous behavior; use about `155–160` (for example `158`) for a stricter final-photo gate. |
 | `instructionText` | `string \| null` | `""` | Optional text above the guide. Missing, empty, or `null` hides it. |
 | `checks` | `object \| null` | standard checks enabled | Enables or disables individual acceptance checks. Missing properties stay enabled. |
 | `timeoutMs` | integer `>= 0` | `0` | Maximum session duration. Zero disables the timeout. |
@@ -219,12 +223,15 @@ A successful scan resolves with metadata and a temporary JPEG:
   "effectiveDocumentLongEdge": 1534,
   "width": 1280,
   "height": 807,
-  "preferredCaptureLongEdge": 1600,
+  "preferredCaptureLongEdge": 2048,
   "maxOutputLongEdge": 1280,
+  "minEffectiveDocumentLongEdge": 1000,
+  "minStillSharpnessVariance": 158.0,
   "mimeType": "image/jpeg",
   "bytes": 613245,
   "quality": {
     "sharpness": 0.84,
+    "sharpnessVariance": 184.27,
     "brightness": 0.56,
     "glare": 0.01,
     "perspective": 0.93,
@@ -283,13 +290,15 @@ A successful scan resolves with metadata and a temporary JPEG:
 | `documentCandidate` | `true` when a card-like quadrilateral was detected, corrected, and returned. It is not an authenticity result. |
 | `usableForOcr` | Whether the final image meets permissive, non-configurable baseline exposure, focus, and severe-glare limits intended for downstream OCR. It does not block capture. |
 | `contentScore` | Position-independent printed-texture score. It is diagnostic and never blocks capture. |
-| `qualityWarnings` | Non-blocking warnings such as `low_sharpness`, `low_light`, `high_light`, `glare`, `uneven_lighting`, or `edge_obstruction`. |
+| `qualityWarnings` | Non-blocking warnings such as `low_sharpness`, `low_light`, `high_light`, `glare`, `uneven_lighting`, or `edge_obstruction`. With the sharpness check enabled, a value below `minStillSharpnessVariance` is recaptured instead of returned; `low_sharpness` can only be returned when that check is disabled. |
 | `confidence` | `document`, `content`, optional `side`/`variant`, and `overall` heuristic scores. |
 | `rawWidth` / `rawHeight` | Oriented native photograph dimensions before document detection, correction, and output resizing. |
 | `effectiveDocumentLongEdge` | Estimated native-pixel long edge of the detected document before correction. It explains the useful source resolution and never causes upscaling. |
 | `width` / `height` / `mimeType` / `bytes` | Encoded corrected-image properties. |
 | `preferredCaptureLongEdge` | Requested native capture preference. The actual `rawWidth`/`rawHeight` depend on camera-supported sizes. |
 | `maxOutputLongEdge` | Effective output-size limit requested for this scan. The actual long edge can be smaller. |
+| `minEffectiveDocumentLongEdge` | Effective minimum useful source resolution. A successful result always meets it unless the value is zero (disabled). |
+| `minStillSharpnessVariance` | Effective raw Laplacian-variance threshold applied to the corrected still photo. |
 | `quality` | Normalized final-image measurements listed below. |
 | `motion` | Inertial-sensor availability, sampling state, filtered rotation/acceleration, and quiet duration at capture. Measurements are `null` when unavailable; missing or inactive sensors fall back to visual stability. |
 | `appliedChecks` | Effective checks used for the scan. These are configuration flags, not scores. |
@@ -304,7 +313,8 @@ All confidence and quality numbers are rounded to four decimals and are diagnost
 
 | Quality field | Meaning |
 | --- | --- |
-| `sharpness` | Normalized focus score; higher is better. |
+| `sharpness` | Backward-compatible normalized focus score; higher is better. |
+| `sharpnessVariance` | Raw final-photo Laplacian variance, directly comparable with `minStillSharpnessVariance`. |
 | `brightness` | Mean normalized luminance; it must remain within an acceptable range. |
 | `glare` | Localized reflection coverage; lower is better. |
 | `perspective` | Geometric regularity; higher is better. |
@@ -339,7 +349,7 @@ Other failures reject with `{ code, message, recoverable }`:
 | `PROCESSING_FAILED` | Non-retryable local failure while decoding, transforming, encoding, writing, or returning the result. |
 | `UNKNOWN` | Unstructured native error normalized by the JavaScript wrapper. |
 
-Quality rejection does not produce `PROCESSING_FAILED`; the image is discarded and capture resumes. Side recognition never rejects in `off` or `advisory`. In `strict`, an unknown or mismatched side is also discarded and scanning resumes. The session ends on success, cancellation, a non-retryable failure, or `DETECTION_TIMEOUT`. With `timeoutMs: 0`, retryable rejection can continue indefinitely.
+Quality rejection does not produce `PROCESSING_FAILED`; the image is discarded and capture resumes. This includes a final document below `minEffectiveDocumentLongEdge` and `low_sharpness` below `minStillSharpnessVariance`. Side recognition never rejects in `off` or `advisory`. In `strict`, an unknown or mismatched side is also discarded and scanning resumes. The session ends on success, cancellation, a non-retryable failure, or `DETECTION_TIMEOUT`. With `timeoutMs: 0`, retryable rejection can continue indefinitely.
 
 ## Architecture and behavior
 
@@ -350,7 +360,9 @@ Quality rejection does not produce `PROCESSING_FAILED`; the image is discarded a
 - When `checks.stability` is enabled, Android uses the device gyroscope and acceleration sensors while iOS samples rotation and user acceleration through Core Motion at approximately 50 Hz. Movement blocks analysis and the shutter; movement detected during capture discards that photo and resumes scanning. Missing, late, or stale sensors fall back to visual stability instead of blocking capture.
 - Android always confirms a compatible quadrilateral across several frames, even when `checks.stability` is disabled. Disabling stability skips the longer hold and sensor gate; it no longer permits capture from one isolated detection.
 - Android crop integrity is mandatory: every detected side must leave enough source-image clearance for an independent outward safety margin. A capture that would clamp or lose any edge is discarded and scanning resumes.
-- Stable valid frames trigger native photo capture. `preferredCaptureLongEdge` controls the native capture target (1600 px by default, with closest-higher-then-lower fallback), while `maxOutputLongEdge` independently caps the corrected JPEG (1280 px by default). A low-resolution document is never enlarged to either value. Colors are preserved without paper-scanner filters.
+- Stable valid frames trigger center-of-document focus and exposure metering. Capture proceeds as soon as AF/AE settles or after a bounded 700 ms fallback, then the still photo is validated independently.
+- `preferredCaptureLongEdge` controls the native capture target (1600 px by default; `2048` is supported with CameraX's closest-higher-then-lower fallback), while `maxOutputLongEdge` independently caps the corrected JPEG at 1280 px by default. JPEG quality remains 95 and a low-resolution document is never enlarged. Colors are preserved without paper-scanner filters.
+- In landscape, the guide uses 80% of the viewport height. Instruction and status messages move inside the top and bottom of the guide so they do not reserve vertical capture space.
 - In the default `dni` profile, a position-independent printed-content score is returned for downstream diagnostics and never blocks capture. In `advisory` or `strict`, a compact 4×3 edge/saturation classifier also estimates side and generation; those estimates remain heuristic and variant never blocks capture. The `genericCard` profile skips those content heuristics and applies quality thresholds suited to visually diverse ID-1 cards.
 
 The native guide changes from red to yellow to green. A subtle gray outline shows the detected quadrilateral, and one message reports the highest-priority problem. Built-in scanner messages are currently in Spanish. `debugMode` adds diagnostic categories for image quality, visual stability, and iOS device movement. Green means accepted, red means rejected, and gray means disabled, unavailable, or not yet sampling.
@@ -391,4 +403,4 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 
 ## Tests
 
-`tests/host` contains deterministic Android tests for geometry, stability, image quality, perspective correction, edge obstruction, and layout classification. `tests/ios` exercises motion fallback, startup, rotation, acceleration, quiet recovery, capture-time movement, and stale samples without Core Motion hardware. The iOS sources are compiled in both simulator and device configurations through the Cordova demo. Reference DNI images are intentionally excluded from the repository and npm package. A physical-device scan remains required before a production release.
+`tests/host` contains deterministic Android tests for geometry, stability, image quality, perspective correction, edge obstruction, layout classification, output sizing, and effective threshold configuration. `tests/ios` exercises option validation, resolution selection, motion fallback, startup, rotation, acceleration, quiet recovery, capture-time movement, and stale samples without Core Motion hardware. `npm test` also verifies the cross-platform still-image gates, AF/AE flow, 80% landscape guide, JPEG 95, no-upscale behavior, and CameraX resolution fallback. The iOS sources are compiled in both simulator and device configurations through the Cordova demo. Reference DNI images are intentionally excluded from the repository and npm package. A physical-device scan remains required before a production release.

@@ -154,6 +154,16 @@ final class StillImageProcessor {
                 rawDimensions[1] / (float) stillFrame.height
             );
             int effectiveDocumentLongEdge = transformer.effectiveDocumentLongEdge(rawQuad);
+            if (effectiveDocumentLongEdge < config.minEffectiveDocumentLongEdge) {
+                throw new RetryableProcessingException(
+                    "La fotografía no alcanzó la resolución efectiva mínima.",
+                    AnalysisResult.State.MOVE_CLOSER,
+                    detection,
+                    preTransformQuality,
+                    stillFrame.width,
+                    stillFrame.height
+                );
+            }
             corrected = transformer.transform(oriented, sourceQuad);
             LumaFrame outputFrame = LumaExtractor.fromBitmap(corrected, config.stillDetectionMaxDimension);
             DocumentQuad outputQuad = new DocumentQuad(
@@ -170,7 +180,7 @@ final class StillImageProcessor {
                 && (outputQuality.brightness > config.maxBrightness
                     || outputQuality.clippedFraction > config.maxClippedFraction);
             if ((checks.sharpness
-                    && outputQuality.sharpness < config.minSharpnessVariance)
+                    && outputQuality.sharpness < config.minStillSharpnessVariance)
                 || outputTooDark
                 || outputTooBright
                 || (checks.glare
@@ -186,7 +196,7 @@ final class StillImageProcessor {
                 } else if (checks.shadows && qualityEvaluator.hasUnevenLighting(outputQuality)) {
                     outputState = AnalysisResult.State.UNEVEN_LIGHTING;
                 } else if (checks.sharpness
-                    && outputQuality.sharpness < config.minSharpnessVariance) {
+                    && outputQuality.sharpness < config.minStillSharpnessVariance) {
                     outputState = AnalysisResult.State.WAITING_FOR_FOCUS;
                 } else if (outputTooDark) {
                     outputState = AnalysisResult.State.IMPROVE_LIGHTING;

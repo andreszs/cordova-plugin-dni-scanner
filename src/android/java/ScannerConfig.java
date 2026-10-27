@@ -8,11 +8,19 @@ final class ScannerConfig {
     static final int MIN_OUTPUT_LONG_EDGE = 640;
     static final int DEFAULT_MAX_OUTPUT_LONG_EDGE = 1280;
     static final int MAX_OUTPUT_LONG_EDGE = 2048;
+    static final int MIN_EFFECTIVE_DOCUMENT_LONG_EDGE = 0;
+    static final int DEFAULT_MIN_EFFECTIVE_DOCUMENT_LONG_EDGE = 0;
+    static final int MAX_EFFECTIVE_DOCUMENT_LONG_EDGE = 4096;
+    static final double MIN_STILL_SHARPNESS_VARIANCE = 1.0;
+    static final double DEFAULT_MIN_STILL_SHARPNESS_VARIANCE = 115.0;
+    static final double MAX_STILL_SHARPNESS_VARIANCE = 10000.0;
     static final float GUIDE_MARGIN_PERCENT = 3f;
     static final float CROP_PADDING_PERCENT = 3f;
     static final ScannerConfig DEFAULT = new ScannerConfig(
         DEFAULT_PREFERRED_CAPTURE_LONG_EDGE,
         DEFAULT_MAX_OUTPUT_LONG_EDGE,
+        DEFAULT_MIN_EFFECTIVE_DOCUMENT_LONG_EDGE,
+        DEFAULT_MIN_STILL_SHARPNESS_VARIANCE,
         ScanProfile.DNI
     );
 
@@ -183,11 +191,14 @@ final class ScannerConfig {
     final long motionRetryMessageDurationMs = 450L;
 
     final long captureDelayMs = 180L;
+    final long focusMeteringTimeoutMs = 700L;
     final long retryMessageDurationMs = 650L;
     final long wrongSideMessageDurationMs = 3000L;
 
     final int preferredCaptureLongEdge;
     final int maxOutputLongEdge;
+    final int minEffectiveDocumentLongEdge;
+    final double minStillSharpnessVariance;
     final float guideMarginPercent;
     final float guideMarginFraction;
     final int jpegQuality = 95;
@@ -200,7 +211,8 @@ final class ScannerConfig {
     final float minimumVariantConfidence = 0.72f;
 
     private ScannerConfig(int preferredCaptureLongEdge, int maxOutputLongEdge,
-                          ScanProfile profile) {
+                          int minEffectiveDocumentLongEdge,
+                          double minStillSharpnessVariance, ScanProfile profile) {
         if (preferredCaptureLongEdge < MIN_PREFERRED_CAPTURE_LONG_EDGE
             || preferredCaptureLongEdge > MAX_PREFERRED_CAPTURE_LONG_EDGE) {
             throw new IllegalArgumentException("Invalid preferred capture long edge");
@@ -209,8 +221,19 @@ final class ScannerConfig {
             || maxOutputLongEdge > MAX_OUTPUT_LONG_EDGE) {
             throw new IllegalArgumentException("Invalid maximum output long edge");
         }
+        if (minEffectiveDocumentLongEdge < MIN_EFFECTIVE_DOCUMENT_LONG_EDGE
+            || minEffectiveDocumentLongEdge > MAX_EFFECTIVE_DOCUMENT_LONG_EDGE) {
+            throw new IllegalArgumentException("Invalid minimum effective document long edge");
+        }
+        if (!Double.isFinite(minStillSharpnessVariance)
+            || minStillSharpnessVariance < MIN_STILL_SHARPNESS_VARIANCE
+            || minStillSharpnessVariance > MAX_STILL_SHARPNESS_VARIANCE) {
+            throw new IllegalArgumentException("Invalid minimum still sharpness variance");
+        }
         this.preferredCaptureLongEdge = preferredCaptureLongEdge;
         this.maxOutputLongEdge = maxOutputLongEdge;
+        this.minEffectiveDocumentLongEdge = minEffectiveDocumentLongEdge;
+        this.minStillSharpnessVariance = minStillSharpnessVariance;
         this.profile = profile == null ? ScanProfile.DNI : profile;
         this.guideMarginPercent = GUIDE_MARGIN_PERCENT;
         this.guideMarginFraction = GUIDE_MARGIN_PERCENT / 100f;
@@ -237,17 +260,40 @@ final class ScannerConfig {
         return forSession(
             DEFAULT_PREFERRED_CAPTURE_LONG_EDGE,
             maxOutputLongEdge,
+            DEFAULT_MIN_EFFECTIVE_DOCUMENT_LONG_EDGE,
+            DEFAULT_MIN_STILL_SHARPNESS_VARIANCE,
             ScanProfile.DNI
         );
     }
 
     static ScannerConfig forSession(int preferredCaptureLongEdge, int maxOutputLongEdge,
                                     ScanProfile profile) {
+        return forSession(
+            preferredCaptureLongEdge,
+            maxOutputLongEdge,
+            DEFAULT_MIN_EFFECTIVE_DOCUMENT_LONG_EDGE,
+            DEFAULT_MIN_STILL_SHARPNESS_VARIANCE,
+            profile
+        );
+    }
+
+    static ScannerConfig forSession(int preferredCaptureLongEdge, int maxOutputLongEdge,
+                                    int minEffectiveDocumentLongEdge,
+                                    double minStillSharpnessVariance,
+                                    ScanProfile profile) {
         if (preferredCaptureLongEdge == DEFAULT_PREFERRED_CAPTURE_LONG_EDGE
             && maxOutputLongEdge == DEFAULT_MAX_OUTPUT_LONG_EDGE
+            && minEffectiveDocumentLongEdge == DEFAULT_MIN_EFFECTIVE_DOCUMENT_LONG_EDGE
+            && minStillSharpnessVariance == DEFAULT_MIN_STILL_SHARPNESS_VARIANCE
             && profile == ScanProfile.DNI) {
             return DEFAULT;
         }
-        return new ScannerConfig(preferredCaptureLongEdge, maxOutputLongEdge, profile);
+        return new ScannerConfig(
+            preferredCaptureLongEdge,
+            maxOutputLongEdge,
+            minEffectiveDocumentLongEdge,
+            minStillSharpnessVariance,
+            profile
+        );
     }
 }

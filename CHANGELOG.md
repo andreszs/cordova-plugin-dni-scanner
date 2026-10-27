@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added backward-compatible `minEffectiveDocumentLongEdge` (disabled by default) so undersized document captures are discarded and scanning resumes.
+- Added `minStillSharpnessVariance` for the corrected still photo, preserving the previous Android/iOS defaults while allowing stricter values such as 155–160; enabled low-sharpness failures now force recapture.
+- Added center-of-document AF/AE before the shutter with a bounded 700 ms fallback on Android and iOS.
+- Expanded the landscape guide from 58% to 80% of viewport height and moved instruction/status messages inside the guide.
+- Added effective resolution/sharpness thresholds and raw `quality.sharpnessVariance` to successful result metadata while retaining native dimensions, effective document resolution, final dimensions, warnings, JPEG 95, and no-upscale output.
+- Added cross-platform option, retry, focus/metering, layout, sizing, and metadata tests without changing Cordova Android 13–15 or Cordova iOS 8 support.
+
 ## 0.2.4 - 2026-10-27
 
 - Added `preferredCaptureLongEdge` on Android and iOS, defaulting to 1600 px with a closest-higher-then-lower native capture fallback.

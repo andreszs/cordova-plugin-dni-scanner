@@ -381,7 +381,10 @@ final class ScannerOverlayView extends View {
         float boxWidth = textWidth + dp(28f);
         float boxHeight = metrics.descent - metrics.ascent + dp(16f);
         float centerX = getWidth() * 0.5f;
-        float top = Math.max(dp(12f), guide.top - boxHeight - dp(14f));
+        boolean landscape = getWidth() > getHeight();
+        float top = landscape
+            ? guide.top + dp(12f)
+            : Math.max(dp(12f), guide.top - boxHeight - dp(14f));
         RectF box = new RectF(
             centerX - boxWidth * 0.5f,
             top,
@@ -411,7 +414,10 @@ final class ScannerOverlayView extends View {
         float boxWidth = textWidth + dp(32f);
         float boxHeight = metrics.descent - metrics.ascent + dp(20f);
         float centerX = getWidth() * 0.5f;
-        float top = guide.bottom + dp(18f);
+        boolean landscape = getWidth() > getHeight();
+        float top = landscape
+            ? guide.bottom - boxHeight - dp(12f)
+            : guide.bottom + dp(18f);
         RectF box = new RectF(
             centerX - boxWidth * 0.5f,
             top,
@@ -428,7 +434,7 @@ final class ScannerOverlayView extends View {
         float maximumWidth = Math.max(1f, getWidth() - horizontalMargin * 2f);
         float width = maximumWidth;
         float height = width / ScannerConfig.DEFAULT.expectedDocumentAspect;
-        float maximumHeight = getHeight() * (getWidth() > getHeight() ? 0.58f : 0.46f);
+        float maximumHeight = getHeight() * (getWidth() > getHeight() ? 0.80f : 0.46f);
         if (height > maximumHeight) {
             height = maximumHeight;
             width = height * ScannerConfig.DEFAULT.expectedDocumentAspect;

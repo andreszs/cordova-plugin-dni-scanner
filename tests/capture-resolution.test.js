@@ -26,6 +26,8 @@ assert(plugin.includes('cordova-android" version=">=13.0.0 &lt;16.0.0"'));
 assert(!gradle.includes("11: '"));
 assert(!gradle.includes("12: '"));
 assert(gradle.includes("13: '1.4.2'"));
+assert(gradle.includes("14: '1.5.2'"));
+assert(gradle.includes("15: '1.6.0'"));
 assert(androidConfig.includes('DEFAULT_PREFERRED_CAPTURE_LONG_EDGE = 1600'));
 assert(androidPlugin.includes('options.has("preferredCaptureLongEdge")'));
 assert(androidCapture.includes('new ResolutionSelector.Builder()'));

@@ -46,7 +46,7 @@ final class DNIOverlayView: UIView {
         var height = width / DNIEngine.expectedAspect
         let usesLandscapeLayout = scanOrientation == "landscape"
             || (scanOrientation == "auto" && area.width > area.height)
-        let maximumHeight = area.height * (usesLandscapeLayout ? 0.58 : 0.46)
+        let maximumHeight = area.height * (usesLandscapeLayout ? 0.80 : 0.46)
         if height > maximumHeight {
             height = maximumHeight
             width = height * DNIEngine.expectedAspect
@@ -62,6 +62,8 @@ final class DNIOverlayView: UIView {
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         let guide = guideRect()
+        let usesLandscapeLayout = scanOrientation == "landscape"
+            || (scanOrientation == "auto" && bounds.width > bounds.height)
 
         context.saveGState()
         context.setFillColor(UIColor.black.withAlphaComponent(0.52).cgColor)
@@ -98,7 +100,9 @@ final class DNIOverlayView: UIView {
             let height = ceil(font.lineHeight) + 16
             drawInlineText(
                 instruction,
-                top: max(safeAreaInsets.top + 12, guide.minY - height - 14),
+                top: usesLandscapeLayout
+                    ? guide.minY + 12
+                    : max(safeAreaInsets.top + 12, guide.minY - height - 14),
                 maxWidth: max(120, guide.width - 24),
                 font: font,
                 color: color == colorForState(.searching) ? color : .white,
@@ -112,10 +116,12 @@ final class DNIOverlayView: UIView {
         let messageHeight = ceil(messageFont.lineHeight) + 20
         drawInlineText(
             message,
-            top: min(
-                bounds.height - safeAreaInsets.bottom - messageHeight - 8,
-                guide.maxY + 18
-            ),
+            top: usesLandscapeLayout
+                ? guide.maxY - messageHeight - 12
+                : min(
+                    bounds.height - safeAreaInsets.bottom - messageHeight - 8,
+                    guide.maxY + 18
+                ),
             maxWidth: max(120, guide.width - 32),
             font: messageFont,
             color: color,
@@ -334,7 +340,7 @@ final class DNIOverlayView: UIView {
         )
     }
 
-    private func mapToView(_ point: CGPoint, imageWidth: Int, imageHeight: Int) -> CGPoint {
+    func mapToView(_ point: CGPoint, imageWidth: Int, imageHeight: Int) -> CGPoint {
         guard imageWidth > 0, imageHeight > 0 else { return .zero }
         let scale = max(bounds.width / CGFloat(imageWidth), bounds.height / CGFloat(imageHeight))
         let offsetX = (bounds.width - CGFloat(imageWidth) * scale) * 0.5
