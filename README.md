@@ -51,12 +51,10 @@ The following images show the companion [`com.andreszs.dniscanner.demo`](https:/
 
 ## Compatibility
 
-The plugin supports `cordova-android` 11 through 15 from one codebase. It selects an exact CameraX version from the installed `cordova-android` major version, not from an overridable `compileSdk` value.
+The plugin supports `cordova-android` 13 through 15 from one codebase. It selects an exact CameraX version from the installed `cordova-android` major version, not from an overridable `compileSdk` value.
 
 | cordova-android | CameraX | Reference toolchain |
 | --- | --- | --- |
-| 11.x | 1.1.0 | compileSdk 32 / AGP 7.2.1 / JDK 11 |
-| 12.x | 1.2.3 | compileSdk 33 / AGP 7.4.2 / JDK 11 |
 | 13.x | 1.4.2 | compileSdk 34 / AGP 8.3.0 / JDK 17 |
 | 14.x | 1.5.2 | compileSdk 35 / AGP 8.7.3 / JDK 17 |
 | 15.x | 1.6.0 | compileSdk 36 / AGP 8.10.1 / JDK 17 |
@@ -114,6 +112,7 @@ const result = await DniScanner.scan({
     showFlashButton: false,
     debugMode: false,
     beepEnabled: true,
+    preferredCaptureLongEdge: 1600,
     maxOutputLongEdge: 1280,
     instructionText: "Ubicá el frente del DNI en el recuadro",
     checks: {
@@ -164,7 +163,8 @@ obstructions.
 | `showFlashButton` | `boolean` | `true` | Shows the flash selector when the device has a flash unit. |
 | `debugMode` | `boolean` | `true` | Shows live metrics over the camera. Enabled checks are green inside their threshold and red outside it; disabled checks are gray. It does not change validation. |
 | `beepEnabled` | `boolean` | `true` | Plays a short synthesized confirmation beep after a successful capture. Device silent mode is respected. |
-| `maxOutputLongEdge` | integer `640–2048` | `1280` | Maximum long edge of the corrected JPEG. The actual image may be smaller when the capture contains fewer effective pixels. |
+| `preferredCaptureLongEdge` | integer `1280–2048` | `1600` | Preferred long edge for the native camera capture. Each platform selects the closest supported size, preferring a higher resolution before falling back to a lower one. |
+| `maxOutputLongEdge` | integer `640–2048` | `1280` | Independent maximum long edge of the perspective-corrected JPEG. The plugin never enlarges a document that contains fewer effective pixels. |
 | `instructionText` | `string \| null` | `""` | Optional text above the guide. Missing, empty, or `null` hides it. |
 | `checks` | `object \| null` | standard checks enabled | Enables or disables individual acceptance checks. Missing properties stay enabled. |
 | `timeoutMs` | integer `>= 0` | `0` | Maximum session duration. Zero disables the timeout. |
@@ -215,8 +215,12 @@ A successful scan resolves with metadata and a temporary JPEG:
     "variant": 0.0,
     "overall": 0.91
   },
+  "rawWidth": 1920,
+  "rawHeight": 1440,
+  "effectiveDocumentLongEdge": 1534,
   "width": 1280,
   "height": 807,
+  "preferredCaptureLongEdge": 1600,
   "maxOutputLongEdge": 1280,
   "mimeType": "image/jpeg",
   "bytes": 613245,
@@ -282,7 +286,10 @@ A successful scan resolves with metadata and a temporary JPEG:
 | `contentScore` | Position-independent printed-texture score. It is diagnostic and never blocks capture. |
 | `qualityWarnings` | Non-blocking warnings such as `low_sharpness`, `low_light`, `high_light`, `glare`, `uneven_lighting`, or `edge_obstruction`. |
 | `confidence` | `document`, `content`, optional `side`/`variant`, and `overall` heuristic scores. |
-| `width` / `height` / `mimeType` / `bytes` | Encoded image properties. |
+| `rawWidth` / `rawHeight` | Oriented native photograph dimensions before document detection, correction, and output resizing. |
+| `effectiveDocumentLongEdge` | Estimated native-pixel long edge of the detected document before correction. It explains the useful source resolution and never causes upscaling. |
+| `width` / `height` / `mimeType` / `bytes` | Encoded corrected-image properties. |
+| `preferredCaptureLongEdge` | Requested native capture preference. The actual `rawWidth`/`rawHeight` depend on camera-supported sizes. |
 | `maxOutputLongEdge` | Effective output-size limit requested for this scan. The actual long edge can be smaller. |
 | `quality` | Normalized final-image measurements listed below. |
 | `motion` | Inertial-sensor availability, sampling state, filtered rotation/acceleration, and quiet duration at capture. Measurements are `null` when unavailable; missing or inactive sensors fall back to visual stability. |
@@ -344,7 +351,7 @@ Quality rejection does not produce `PROCESSING_FAILED`; the image is discarded a
 - When `checks.stability` is enabled, Android uses the device gyroscope and acceleration sensors while iOS samples rotation and user acceleration through Core Motion at approximately 50 Hz. Movement blocks analysis and the shutter; movement detected during capture discards that photo and resumes scanning. Missing, late, or stale sensors fall back to visual stability instead of blocking capture.
 - Android always confirms a compatible quadrilateral across several frames, even when `checks.stability` is disabled. Disabling stability skips the longer hold and sensor gate; it no longer permits capture from one isolated detection.
 - Android crop integrity is mandatory: every detected side must leave enough source-image clearance for an independent outward safety margin. A capture that would clamp or lose any edge is discarded and scanning resumes.
-- Stable valid frames trigger native photo capture; the result is perspective-corrected and saved as JPEG 95 with a configurable maximum long edge (1280 px by default, capped at 2048 px). Colors are preserved without paper-scanner filters.
+- Stable valid frames trigger native photo capture. `preferredCaptureLongEdge` controls the native capture target (1600 px by default, with closest-higher-then-lower fallback), while `maxOutputLongEdge` independently caps the corrected JPEG (1280 px by default). A low-resolution document is never enlarged to either value. Colors are preserved without paper-scanner filters.
 - In the default `dni` profile, a position-independent printed-content score is returned for downstream diagnostics and never blocks capture. In `advisory` or `strict`, a compact 4×3 edge/saturation classifier also estimates side and generation; those estimates remain heuristic and variant never blocks capture. The `genericCard` profile skips those content heuristics and applies quality thresholds suited to visually diverse ID-1 cards.
 
 The native guide changes from red to yellow to green. A subtle gray outline shows the detected quadrilateral, and one message reports the highest-priority problem. Built-in scanner messages are currently in Spanish. `debugMode` adds diagnostic categories for image quality, visual stability, and iOS device movement. Green means accepted, red means rejected, and gray means disabled, unavailable, or not yet sampling.
@@ -388,6 +395,12 @@ The unused CameraX video stack is excluded. The plugin contains no ML models, na
 `tests/host` contains deterministic Android tests for geometry, stability, image quality, perspective correction, edge obstruction, and layout classification. `tests/ios` exercises motion fallback, startup, rotation, acceleration, quiet recovery, capture-time movement, and stale samples without Core Motion hardware. The iOS sources are compiled in both simulator and device configurations through the Cordova demo. Reference DNI images are intentionally excluded from the repository and npm package. A physical-device scan remains required before a production release.
 
 ## Changelog
+
+### Unreleased
+
+- Added `preferredCaptureLongEdge` on Android and iOS, defaulting to 1600 px with a closest-higher-then-lower native capture fallback.
+- Added `rawWidth`, `rawHeight`, and `effectiveDocumentLongEdge` result metadata and prevented corrected-image upscaling.
+- Raised the Android minimum to `cordova-android` 13 so all supported Android builds use `ResolutionSelector` directly with a compatible compile SDK.
 
 ### 0.2.3
 

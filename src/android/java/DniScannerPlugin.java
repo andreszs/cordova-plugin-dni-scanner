@@ -103,6 +103,20 @@ public final class DniScannerPlugin extends CordovaPlugin {
         if (!isBooleanOption(options, "beepEnabled")) {
             return "La opción beepEnabled debe ser booleana.";
         }
+        if (options.has("preferredCaptureLongEdge")) {
+            Object rawPreferred = options.opt("preferredCaptureLongEdge");
+            if (!(rawPreferred instanceof Number)) {
+                return "La opción preferredCaptureLongEdge debe ser numérica.";
+            }
+            double preferred = ((Number) rawPreferred).doubleValue();
+            if (Double.isNaN(preferred)
+                || Double.isInfinite(preferred)
+                || preferred != Math.rint(preferred)
+                || preferred < ScannerConfig.MIN_PREFERRED_CAPTURE_LONG_EDGE
+                || preferred > ScannerConfig.MAX_PREFERRED_CAPTURE_LONG_EDGE) {
+                return "La opción preferredCaptureLongEdge debe ser un entero entre 1280 y 2048.";
+            }
+        }
         if (options.has("maxOutputLongEdge")) {
             Object rawMaximum = options.opt("maxOutputLongEdge");
             if (!(rawMaximum instanceof Number)) {

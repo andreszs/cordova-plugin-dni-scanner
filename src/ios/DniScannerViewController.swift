@@ -33,6 +33,7 @@ final class DNIViewController: UIViewController {
     private var flashButton: UIButton?
     private var videoOutput: AVCaptureVideoDataOutput?
     private var photoOutput: AVCapturePhotoOutput?
+    private var selectedPhotoDimensions: CMVideoDimensions?
     private var camera: AVCaptureDevice?
     private var currentFlashMode: String
     private var lastAnalysisTime: CFTimeInterval = 0
@@ -257,7 +258,27 @@ final class DNIViewController: UIViewController {
                     throw DNIError.cameraUnavailable("No se pudo configurar la captura de fotografías.", true)
                 }
                 self.session.addOutput(photo)
-                photo.isHighResolutionCaptureEnabled = true
+                photo.maxPhotoQualityPrioritization = .quality
+                if #available(iOS 16.0, *) {
+                    let candidates = camera.activeFormat.supportedMaxPhotoDimensions.map {
+                        DNICaptureDimensions(width: $0.width, height: $0.height)
+                    }
+                    if let selected = DNICaptureResolutionSelector.select(
+                        candidates,
+                        preferredLongEdge: self.options.preferredCaptureLongEdge
+                    ) {
+                        let dimensions = CMVideoDimensions(
+                            width: selected.width,
+                            height: selected.height
+                        )
+                        photo.maxPhotoDimensions = dimensions
+                        self.selectedPhotoDimensions = dimensions
+                    } else {
+                        photo.isHighResolutionCaptureEnabled = true
+                    }
+                } else {
+                    photo.isHighResolutionCaptureEnabled = true
+                }
                 self.photoOutput = photo
                 self.session.commitConfiguration()
 
@@ -534,7 +555,12 @@ final class DNIViewController: UIViewController {
         } else {
             settings = AVCapturePhotoSettings()
         }
-        settings.isHighResolutionPhotoEnabled = true
+        settings.photoQualityPrioritization = .quality
+        if #available(iOS 16.0, *), let dimensions = selectedPhotoDimensions {
+            settings.maxPhotoDimensions = dimensions
+        } else {
+            settings.isHighResolutionPhotoEnabled = true
+        }
         if let camera = camera, camera.hasFlash, currentFlashMode == "auto" {
             settings.flashMode = .auto
         } else {

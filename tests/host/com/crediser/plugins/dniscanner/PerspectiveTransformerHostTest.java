@@ -16,6 +16,9 @@ public final class PerspectiveTransformerHostTest {
         if (ScannerConfig.DEFAULT.maxOutputLongEdge != 1280) {
             throw new AssertionError("The default maximum output long edge must be 1280 px");
         }
+        if (ScannerConfig.DEFAULT.preferredCaptureLongEdge != 1600) {
+            throw new AssertionError("The default preferred capture long edge must be 1600 px");
+        }
         if (ScannerConfig.DEFAULT.cropPaddingPercent != ScannerConfig.CROP_PADDING_PERCENT) {
             throw new AssertionError("The default crop safety padding must be 3 percent");
         }
@@ -114,14 +117,48 @@ public final class PerspectiveTransformerHostTest {
             throw new AssertionError("The configured output maximum was not applied");
         }
 
+        DocumentQuad lowResolutionQuad = new DocumentQuad(
+            new PointF(50f, 45f),
+            new PointF(550f, 45f),
+            new PointF(550f, 360f),
+            new PointF(50f, 360f)
+        );
+        BufferedImage lowResolutionSource = new BufferedImage(
+            600,
+            405,
+            BufferedImage.TYPE_INT_ARGB
+        );
+        Bitmap lowResolution = transformer.transform(
+            new Bitmap(lowResolutionSource),
+            lowResolutionQuad
+        );
+        if (lowResolution.getWidth() >= 640) {
+            throw new AssertionError("Low-resolution captures must not be upscaled");
+        }
+
         assertInvalidMaximum(639);
         assertInvalidMaximum(2049);
+        assertInvalidPreferredCapture(1279);
+        assertInvalidPreferredCapture(2049);
     }
 
     private static void assertInvalidMaximum(int value) {
         try {
             ScannerConfig.withMaxOutputLongEdge(value);
             throw new AssertionError("Expected invalid maximum to be rejected: " + value);
+        } catch (IllegalArgumentException expected) {
+            // Expected.
+        }
+    }
+
+    private static void assertInvalidPreferredCapture(int value) {
+        try {
+            ScannerConfig.forSession(
+                value,
+                ScannerConfig.DEFAULT_MAX_OUTPUT_LONG_EDGE,
+                ScanProfile.DNI
+            );
+            throw new AssertionError("Expected invalid preferred capture size: " + value);
         } catch (IllegalArgumentException expected) {
             // Expected.
         }

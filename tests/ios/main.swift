@@ -171,6 +171,61 @@ private let tests: [(String, () throws -> Void)] = [
     ("side validation defaults to off", {
         let options = try DNIOptions(dictionary: ["side": "front"])
         try expect(options.sideValidation == .off, "permissive side validation must be the default")
+        try expect(
+            options.preferredCaptureLongEdge == 1600,
+            "preferred capture long edge must default to 1600"
+        )
+    }),
+    ("preferred capture long edge is validated", {
+        let options = try DNIOptions(dictionary: [
+            "side": "front",
+            "preferredCaptureLongEdge": 2048
+        ])
+        try expect(options.preferredCaptureLongEdge == 2048, "valid capture size should be preserved")
+        do {
+            _ = try DNIOptions(dictionary: [
+                "side": "front",
+                "preferredCaptureLongEdge": 1279
+            ])
+            throw TestFailure(description: "capture size below the range should fail")
+        } catch is TestFailure {
+            throw TestFailure(description: "invalid capture size was accepted")
+        } catch {
+            // Expected DNIError.invalidArgument.
+        }
+    }),
+    ("capture resolution prefers higher before lower", {
+        let candidates = [
+            DNICaptureDimensions(width: 1024, height: 768),
+            DNICaptureDimensions(width: 1920, height: 1440),
+            DNICaptureDimensions(width: 1280, height: 960)
+        ]
+        let higher = DNICaptureResolutionSelector.select(
+            candidates,
+            preferredLongEdge: 1600
+        )
+        try expect(higher?.longEdge == 1920, "closest higher resolution should win")
+        let lower = DNICaptureResolutionSelector.select(
+            candidates,
+            preferredLongEdge: 2048
+        )
+        try expect(lower?.longEdge == 1920, "closest lower resolution should be the fallback")
+    }),
+    ("corrected output never upscales the effective document", {
+        try expect(
+            DNIOutputSizing.longEdge(
+                effectiveDocumentLongEdge: 520,
+                maximumLongEdge: 1280
+            ) == 520,
+            "a low-resolution document must not be enlarged"
+        )
+        try expect(
+            DNIOutputSizing.longEdge(
+                effectiveDocumentLongEdge: 1600,
+                maximumLongEdge: 1280
+            ) == 1280,
+            "the configured output maximum must still cap larger captures"
+        )
     }),
     ("side validation policies are accepted", {
         let advisory = try DNIOptions(dictionary: [

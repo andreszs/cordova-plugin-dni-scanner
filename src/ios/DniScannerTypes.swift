@@ -125,6 +125,9 @@ enum DNIScanProfile: String {
 }
 
 struct DNIOptions {
+    static let minimumPreferredCaptureLongEdge = 1280
+    static let defaultPreferredCaptureLongEdge = 1600
+    static let maximumPreferredCaptureLongEdge = 2048
     static let minimumOutputLongEdge = 640
     static let maximumOutputLongEdge = 2048
 
@@ -137,6 +140,7 @@ struct DNIOptions {
     let showFlashButton: Bool
     let debugMode: Bool
     let beepEnabled: Bool
+    let preferredCaptureLongEdge: Int
     let maxOutputLongEdge: Int
     let instructionText: String
     let timeoutMs: Int
@@ -190,6 +194,26 @@ struct DNIOptions {
             return boolean
         }
 
+        let preferredNumber: NSNumber
+        if let rawPreferred = dictionary["preferredCaptureLongEdge"] {
+            guard !(rawPreferred is Bool), let number = rawPreferred as? NSNumber else {
+                throw DNIError.invalidArgument(
+                    "La opción preferredCaptureLongEdge debe ser numérica."
+                )
+            }
+            preferredNumber = number
+        } else {
+            preferredNumber = NSNumber(value: Self.defaultPreferredCaptureLongEdge)
+        }
+        let preferred = preferredNumber.intValue
+        guard preferredNumber.doubleValue == Double(preferred),
+              preferred >= Self.minimumPreferredCaptureLongEdge,
+              preferred <= Self.maximumPreferredCaptureLongEdge else {
+            throw DNIError.invalidArgument(
+                "La opción preferredCaptureLongEdge debe ser un entero entre 1280 y 2048."
+            )
+        }
+
         let outputNumber = dictionary["maxOutputLongEdge"] as? NSNumber ?? 1280
         let output = outputNumber.intValue
         guard outputNumber.doubleValue == Double(output),
@@ -233,10 +257,54 @@ struct DNIOptions {
         self.showFlashButton = try strictBool("showFlashButton", fallback: true)
         self.debugMode = try strictBool("debugMode", fallback: true)
         self.beepEnabled = try strictBool("beepEnabled", fallback: true)
+        self.preferredCaptureLongEdge = preferred
         self.maxOutputLongEdge = output
         self.instructionText = instruction
         self.timeoutMs = timeout
         self.checks = try DNIChecks(dictionary: checksDictionary)
+    }
+}
+
+struct DNICaptureDimensions: Equatable {
+    let width: Int32
+    let height: Int32
+
+    var longEdge: Int { max(Int(width), Int(height)) }
+}
+
+enum DNICaptureResolutionSelector {
+    static func select(
+        _ candidates: [DNICaptureDimensions],
+        preferredLongEdge: Int
+    ) -> DNICaptureDimensions? {
+        let valid = candidates.filter { $0.width > 0 && $0.height > 0 }
+        let higher = valid
+            .filter { $0.longEdge >= preferredLongEdge }
+            .min { first, second in
+                if first.longEdge != second.longEdge {
+                    return first.longEdge < second.longEdge
+                }
+                return area(first) < area(second)
+            }
+        if let higher = higher {
+            return higher
+        }
+        return valid.max { first, second in
+            if first.longEdge != second.longEdge {
+                return first.longEdge < second.longEdge
+            }
+            return area(first) < area(second)
+        }
+    }
+
+    private static func area(_ dimensions: DNICaptureDimensions) -> Int64 {
+        return Int64(dimensions.width) * Int64(dimensions.height)
+    }
+}
+
+enum DNIOutputSizing {
+    static func longEdge(effectiveDocumentLongEdge: Int, maximumLongEdge: Int) -> Int {
+        return max(1, min(effectiveDocumentLongEdge, maximumLongEdge))
     }
 }
 
@@ -432,6 +500,9 @@ struct DNIAnalysis {
 
 struct DNIProcessedScan {
     let fileURL: URL
+    let rawWidth: Int
+    let rawHeight: Int
+    let effectiveDocumentLongEdge: Int
     let width: Int
     let height: Int
     let detection: DNIDetection

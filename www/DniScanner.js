@@ -28,7 +28,7 @@ function normalizeError(error) {
  *          sideValidation?: ('off'|'advisory'|'strict'),
  *          flashMode?: ('off'|'auto'|'on'), showCloseButton?: boolean,
  *          showFlashButton?: boolean, debugMode?: boolean, beepEnabled?: boolean,
- *          maxOutputLongEdge?: number,
+ *          preferredCaptureLongEdge?: number, maxOutputLongEdge?: number,
  *          instructionText?: string,
  *          checks?: {documentSize?: boolean, centering?: boolean,
  *          perspective?: boolean, stability?: boolean, sharpness?: boolean,

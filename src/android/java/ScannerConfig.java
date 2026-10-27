@@ -2,12 +2,16 @@ package com.crediser.plugins.dniscanner;
 
 /** Centralized, resolution-independent scanner parameters. */
 final class ScannerConfig {
+    static final int MIN_PREFERRED_CAPTURE_LONG_EDGE = 1280;
+    static final int DEFAULT_PREFERRED_CAPTURE_LONG_EDGE = 1600;
+    static final int MAX_PREFERRED_CAPTURE_LONG_EDGE = 2048;
     static final int MIN_OUTPUT_LONG_EDGE = 640;
     static final int DEFAULT_MAX_OUTPUT_LONG_EDGE = 1280;
     static final int MAX_OUTPUT_LONG_EDGE = 2048;
     static final float GUIDE_MARGIN_PERCENT = 3f;
     static final float CROP_PADDING_PERCENT = 3f;
     static final ScannerConfig DEFAULT = new ScannerConfig(
+        DEFAULT_PREFERRED_CAPTURE_LONG_EDGE,
         DEFAULT_MAX_OUTPUT_LONG_EDGE,
         ScanProfile.DNI
     );
@@ -182,6 +186,7 @@ final class ScannerConfig {
     final long retryMessageDurationMs = 650L;
     final long wrongSideMessageDurationMs = 3000L;
 
+    final int preferredCaptureLongEdge;
     final int maxOutputLongEdge;
     final float guideMarginPercent;
     final float guideMarginFraction;
@@ -194,11 +199,17 @@ final class ScannerConfig {
     final float minimumSideConfidence = 0.76f;
     final float minimumVariantConfidence = 0.72f;
 
-    private ScannerConfig(int maxOutputLongEdge, ScanProfile profile) {
+    private ScannerConfig(int preferredCaptureLongEdge, int maxOutputLongEdge,
+                          ScanProfile profile) {
+        if (preferredCaptureLongEdge < MIN_PREFERRED_CAPTURE_LONG_EDGE
+            || preferredCaptureLongEdge > MAX_PREFERRED_CAPTURE_LONG_EDGE) {
+            throw new IllegalArgumentException("Invalid preferred capture long edge");
+        }
         if (maxOutputLongEdge < MIN_OUTPUT_LONG_EDGE
             || maxOutputLongEdge > MAX_OUTPUT_LONG_EDGE) {
             throw new IllegalArgumentException("Invalid maximum output long edge");
         }
+        this.preferredCaptureLongEdge = preferredCaptureLongEdge;
         this.maxOutputLongEdge = maxOutputLongEdge;
         this.profile = profile == null ? ScanProfile.DNI : profile;
         this.guideMarginPercent = GUIDE_MARGIN_PERCENT;
@@ -223,14 +234,20 @@ final class ScannerConfig {
     }
 
     static ScannerConfig withMaxOutputLongEdge(int maxOutputLongEdge) {
-        return forSession(maxOutputLongEdge, ScanProfile.DNI);
+        return forSession(
+            DEFAULT_PREFERRED_CAPTURE_LONG_EDGE,
+            maxOutputLongEdge,
+            ScanProfile.DNI
+        );
     }
 
-    static ScannerConfig forSession(int maxOutputLongEdge, ScanProfile profile) {
-        if (maxOutputLongEdge == DEFAULT_MAX_OUTPUT_LONG_EDGE
+    static ScannerConfig forSession(int preferredCaptureLongEdge, int maxOutputLongEdge,
+                                    ScanProfile profile) {
+        if (preferredCaptureLongEdge == DEFAULT_PREFERRED_CAPTURE_LONG_EDGE
+            && maxOutputLongEdge == DEFAULT_MAX_OUTPUT_LONG_EDGE
             && profile == ScanProfile.DNI) {
             return DEFAULT;
         }
-        return new ScannerConfig(maxOutputLongEdge, profile);
+        return new ScannerConfig(preferredCaptureLongEdge, maxOutputLongEdge, profile);
     }
 }

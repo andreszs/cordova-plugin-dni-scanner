@@ -75,6 +75,23 @@ final class DNIImageFactory {
         return try render(image, maxDimension: maxDimension)
     }
 
+    func orientedDimensions(from data: Data) throws -> (width: Int, height: Int) {
+        guard let image = CIImage(
+            data: data,
+            options: [.applyOrientationProperty: true]
+        ) else {
+            throw DNIError.processingFailed("No se pudo decodificar la fotografía capturada.", false)
+        }
+        let extent = image.extent.integral
+        guard extent.width > 1, extent.height > 1 else {
+            throw DNIError.processingFailed("La imagen capturada no tiene dimensiones válidas.", false)
+        }
+        return (
+            width: Int(extent.width.rounded()),
+            height: Int(extent.height.rounded())
+        )
+    }
+
     func raster(from cgImage: CGImage, width: Int, height: Int) throws -> DNIRaster {
         let source = CIImage(cgImage: cgImage)
         let scaleX = CGFloat(width) / source.extent.width
@@ -108,7 +125,10 @@ final class DNIImageFactory {
             (quad.topWidth + quad.bottomWidth) * 0.5,
             (quad.leftHeight + quad.rightHeight) * 0.5 * expectedAspect
         )
-        let targetWidth = max(640, min(maxLongEdge, Int(naturalWidth.rounded())))
+        let targetWidth = DNIOutputSizing.longEdge(
+            effectiveDocumentLongEdge: Int(naturalWidth.rounded()),
+            maximumLongEdge: maxLongEdge
+        )
         let targetHeight = max(1, Int((CGFloat(targetWidth) / expectedAspect).rounded()))
         let translated = corrected.transformed(
             by: CGAffineTransform(translationX: -corrected.extent.origin.x, y: -corrected.extent.origin.y)
@@ -601,7 +621,11 @@ final class DNIStillProcessor {
     private let recognizer = DNISideVariantRecognizer()
 
     func process(data: Data, options: DNIOptions, directory: URL) throws -> DNIProcessedScan {
-        let source = try factory.raster(from: data, maxDimension: max(options.maxOutputLongEdge, 1280))
+        let rawDimensions = try factory.orientedDimensions(from: data)
+        let source = try factory.raster(
+            from: data,
+            maxDimension: max(options.preferredCaptureLongEdge, options.maxOutputLongEdge)
+        )
         let permitted = CGRect(x: 0.015, y: 0.015, width: 0.97, height: 0.97)
         guard let detection = try engine.detect(
             raster: source,
@@ -620,6 +644,15 @@ final class DNIStillProcessor {
         if preState != .ready && preState != .moveCloser && preState != .moveAway && preState != .centerDocument {
             throw DNIError.retry("La fotografía final no alcanzó la calidad mínima.", preState)
         }
+
+        let rawQuad = detection.quad.scaled(
+            x: CGFloat(rawDimensions.width) / CGFloat(source.width),
+            y: CGFloat(rawDimensions.height) / CGFloat(source.height)
+        )
+        let effectiveDocumentLongEdge = Int(max(
+            (rawQuad.topWidth + rawQuad.bottomWidth) * 0.5,
+            (rawQuad.leftHeight + rawQuad.rightHeight) * 0.5 * DNIEngine.expectedAspect
+        ).rounded())
 
         let correctedCG = try factory.correctedImage(
             from: source,
@@ -668,6 +701,9 @@ final class DNIStillProcessor {
         try jpeg.write(to: fileURL, options: .atomic)
         return DNIProcessedScan(
             fileURL: fileURL,
+            rawWidth: rawDimensions.width,
+            rawHeight: rawDimensions.height,
+            effectiveDocumentLongEdge: max(1, effectiveDocumentLongEdge),
             width: corrected.width,
             height: corrected.height,
             detection: detection,

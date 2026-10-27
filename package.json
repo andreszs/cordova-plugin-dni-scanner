@@ -49,6 +49,6 @@
     "provenance": true
   },
   "scripts": {
-    "test": "node tests/success-beep.test.js"
+    "test": "node tests/success-beep.test.js && node tests/capture-resolution.test.js"
   }
 }

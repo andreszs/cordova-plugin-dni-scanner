@@ -32,14 +32,9 @@ final class PerspectiveTransformer {
         if (quad == null) {
             throw new IllegalArgumentException("No se pudo expandir el recorte del documento.");
         }
-        float averageWidth = (quad.topWidth() + quad.bottomWidth()) * 0.5f;
-        float averageHeight = (quad.leftHeight() + quad.rightHeight()) * 0.5f;
-        int naturalWidth = Math.max(1, Math.round(Math.max(
-            averageWidth,
-            averageHeight * config.expectedDocumentAspect
-        )));
+        int naturalWidth = effectiveDocumentLongEdge(quad);
         int targetWidth = Math.min(config.maxOutputLongEdge, naturalWidth);
-        targetWidth = Math.max(640, targetWidth);
+        targetWidth = Math.max(1, targetWidth);
         int targetHeight = Math.max(1, Math.round(targetWidth / config.expectedDocumentAspect));
 
         float[] sourcePoints = {
@@ -68,6 +63,15 @@ final class PerspectiveTransformer {
         // Java-level divisions and interpolations on legacy ARM processors.
         canvas.drawBitmap(source, transform, paint);
         return output;
+    }
+
+    int effectiveDocumentLongEdge(DocumentQuad quad) {
+        float averageWidth = (quad.topWidth() + quad.bottomWidth()) * 0.5f;
+        float averageHeight = (quad.leftHeight() + quad.rightHeight()) * 0.5f;
+        return Math.max(1, Math.round(Math.max(
+            averageWidth,
+            averageHeight * config.expectedDocumentAspect
+        )));
     }
 
     boolean hasSufficientSourceMargin(DocumentQuad quad, int sourceWidth, int sourceHeight) {

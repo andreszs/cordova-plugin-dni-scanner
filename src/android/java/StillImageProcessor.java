@@ -40,15 +40,22 @@ final class StillImageProcessor {
 
     static final class Result {
         final File file;
+        final int rawWidth;
+        final int rawHeight;
+        final int effectiveDocumentLongEdge;
         final int width;
         final int height;
         final DocumentDetection detection;
         final QualityMetrics quality;
         final RecognitionResult recognition;
 
-        Result(File file, int width, int height, DocumentDetection detection,
+        Result(File file, int rawWidth, int rawHeight, int effectiveDocumentLongEdge,
+               int width, int height, DocumentDetection detection,
                QualityMetrics quality, RecognitionResult recognition) {
             this.file = file;
+            this.rawWidth = rawWidth;
+            this.rawHeight = rawHeight;
+            this.effectiveDocumentLongEdge = effectiveDocumentLongEdge;
             this.width = width;
             this.height = height;
             this.detection = detection;
@@ -76,6 +83,7 @@ final class StillImageProcessor {
 
     Result process(File rawFile, File outputFile)
         throws IOException, RetryableProcessingException {
+        int[] rawDimensions = orientedRawDimensions(rawFile);
         Bitmap decoded = decodeForProcessing(rawFile);
         if (decoded == null) {
             throw new IOException("No se pudo decodificar la fotografía capturada.");
@@ -141,6 +149,11 @@ final class StillImageProcessor {
             float scaleX = oriented.getWidth() / (float) stillFrame.width;
             float scaleY = oriented.getHeight() / (float) stillFrame.height;
             DocumentQuad sourceQuad = detection.quad.scaled(scaleX, scaleY);
+            DocumentQuad rawQuad = detection.quad.scaled(
+                rawDimensions[0] / (float) stillFrame.width,
+                rawDimensions[1] / (float) stillFrame.height
+            );
+            int effectiveDocumentLongEdge = transformer.effectiveDocumentLongEdge(rawQuad);
             corrected = transformer.transform(oriented, sourceQuad);
             LumaFrame outputFrame = LumaExtractor.fromBitmap(corrected, config.stillDetectionMaxDimension);
             DocumentQuad outputQuad = new DocumentQuad(
@@ -213,6 +226,9 @@ final class StillImageProcessor {
             }
             return new Result(
                 outputFile,
+                rawDimensions[0],
+                rawDimensions[1],
+                effectiveDocumentLongEdge,
                 corrected.getWidth(),
                 corrected.getHeight(),
                 detection,
@@ -236,7 +252,9 @@ final class StillImageProcessor {
         }
         int longest = Math.max(bounds.outWidth, bounds.outHeight);
         int sampleSize = 1;
-        int minimumDecodedLongEdge = Math.round(config.maxOutputLongEdge * 0.90f);
+        int minimumDecodedLongEdge = Math.round(
+            Math.max(config.preferredCaptureLongEdge, config.maxOutputLongEdge) * 0.90f
+        );
         while (longest / (sampleSize * 2) >= minimumDecodedLongEdge) {
             sampleSize *= 2;
         }
@@ -244,6 +262,27 @@ final class StillImageProcessor {
         options.inSampleSize = sampleSize;
         options.inPreferredConfig = Bitmap.Config.ARGB_8888;
         return BitmapFactory.decodeFile(file.getAbsolutePath(), options);
+    }
+
+    private int[] orientedRawDimensions(File file) throws IOException {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(file.getAbsolutePath(), bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            throw new IOException("La fotografía capturada no tiene dimensiones válidas.");
+        }
+        ExifInterface exif = new ExifInterface(file.getAbsolutePath());
+        int orientation = exif.getAttributeInt(
+            ExifInterface.TAG_ORIENTATION,
+            ExifInterface.ORIENTATION_NORMAL
+        );
+        boolean swapsDimensions = orientation == ExifInterface.ORIENTATION_TRANSPOSE
+            || orientation == ExifInterface.ORIENTATION_ROTATE_90
+            || orientation == ExifInterface.ORIENTATION_TRANSVERSE
+            || orientation == ExifInterface.ORIENTATION_ROTATE_270;
+        return swapsDimensions
+            ? new int[] { bounds.outHeight, bounds.outWidth }
+            : new int[] { bounds.outWidth, bounds.outHeight };
     }
 
     private Bitmap orientFromExif(Bitmap bitmap, File file) throws IOException {

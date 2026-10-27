@@ -129,6 +129,10 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
                 throw new IllegalArgumentException("Invalid side validation mode");
             }
             config = ScannerConfig.forSession(
+                options.optInt(
+                    "preferredCaptureLongEdge",
+                    ScannerConfig.DEFAULT_PREFERRED_CAPTURE_LONG_EDGE
+                ),
                 options.optInt("maxOutputLongEdge", ScannerConfig.DEFAULT_MAX_OUTPUT_LONG_EDGE),
                 scanProfile
             );
@@ -427,10 +431,15 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         int captureMode = Build.VERSION.SDK_INT <= Build.VERSION_CODES.M
             ? ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
             : ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY;
-        imageCapture = new ImageCapture.Builder()
+        ImageCapture.Builder imageCaptureBuilder = new ImageCapture.Builder()
             .setCaptureMode(captureMode)
-            .setTargetRotation(targetRotation)
-            .build();
+            .setTargetRotation(targetRotation);
+        CaptureResolutionConfigurator.apply(
+            imageCaptureBuilder,
+            config.preferredCaptureLongEdge,
+            targetRotation
+        );
+        imageCapture = imageCaptureBuilder.build();
 
         try {
             UseCaseGroup.Builder groupBuilder = new UseCaseGroup.Builder()
@@ -922,6 +931,10 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         json.put("confidence", confidence);
         json.put("width", result.width);
         json.put("height", result.height);
+        json.put("rawWidth", result.rawWidth);
+        json.put("rawHeight", result.rawHeight);
+        json.put("effectiveDocumentLongEdge", result.effectiveDocumentLongEdge);
+        json.put("preferredCaptureLongEdge", config.preferredCaptureLongEdge);
         json.put("maxOutputLongEdge", config.maxOutputLongEdge);
         json.put("mimeType", "image/jpeg");
         json.put("bytes", result.file.length());

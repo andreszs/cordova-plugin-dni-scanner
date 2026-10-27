@@ -74,6 +74,7 @@ public final class QualityEvaluatorHostTest {
 
     private static void assertGenericCardPolicy(DocumentDetection detection) {
         ScannerConfig genericConfig = ScannerConfig.forSession(
+            ScannerConfig.DEFAULT_PREFERRED_CAPTURE_LONG_EDGE,
             ScannerConfig.DEFAULT_MAX_OUTPUT_LONG_EDGE,
             ScanProfile.GENERIC_CARD
         );
