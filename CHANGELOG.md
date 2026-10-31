@@ -1,6 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-10-31
+
+- Replaced the Android Sobel/Hough detector with an OpenCV 4.12 multi-strategy contour engine, four-side evidence scoring, pyramidal optical-flow tracking, temporal smoothing, and fresh-geometry shutter validation.
+- Replaced the custom iOS geometric fallback with Vision document segmentation, native rectangle fallback, Vision rectangle tracking, temporal smoothing, and fresh-geometry shutter validation.
+- Replaced perspective homography and corrective document rotation with a pixel-preserving axis-aligned crop and mandatory 6% safety margin; EXIF camera orientation normalization remains enabled.
+- Added mandatory geometry rules on preview and still capture: rectangles allow 1.5 degrees of detection noise, clean near-isosceles trapezoids allow up to 8 degrees with at most 2.5 degrees of symmetry error, and in-plane roll is limited to 2 degrees.
+- Re-runs detection on the high-resolution still with the stable preview track as a guarded prior, then evaluates and returns the unwarped crop without upscaling.
+- Fixed an Android tracker race that could preserve stable observations while losing their start timestamp and leave `Mantené esta posición` stuck at 0 ms.
+- Kept preview analysis active while AF/AE settles, starts metering before full stability, and added bounded recovery from movement or lost tracking.
+- Added a native manual **Capturar** button and made `autoCapture: false` a supported manual-only mode on Android and iOS.
+- Added a five-segment ML Kit-style progress indicator for detection, framing, quality, stability, and capture, with explicit `Enfocando…`, `Tomando foto`, `Procesando imagen…`, retry, and success stages.
+- Matched Face Capture's green/yellow/red feedback palette, 500 ms live-instruction confirmation, 300 ms tracking-loss grace, and 1000 ms failed-attempt feedback.
+- Balanced portrait spacing around the guide, progress bar, and labels while keeping the diagnostic panel as an independent overlay.
+- Made the dotted guide an outward-tolerant aiming aid and retained mandatory full-border and crop-integrity validation.
+- Reduced false overexposure rejections on pale DNI stock by requiring both a high global mean and substantial highlight clipping while preserving the localized-glare gate.
+- Calibrated handheld motion sensitivity and made final JPEG sharpness more authoritative than transient post-shutter sensor spikes.
+- Raised minimum compatibility to cordova-android 15 and iOS 15.5. Processing remains fully offline and does not use Google Play Services.
 
 ## 0.2.5 - 2026-10-27
 

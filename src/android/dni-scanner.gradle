@@ -38,20 +38,12 @@ def dniScannerReadCordovaAndroidMajor() {
     )
 }
 
-def dniScannerCameraXByCordova = [
-    13: '1.4.2',
-    14: '1.5.2',
-    15: '1.6.0'
-]
+def dniScannerCameraXByCordova = [15: '1.6.0']
 
 // Same versions already provided at runtime by each cordova-android release.
 // compileOnly exposes WebViewAssetLoader's PathHandler type to this plugin's javac
 // without adding or overriding the host's AndroidX WebKit dependency.
-def dniScannerWebKitByCordova = [
-    13: '1.6.0',
-    14: '1.12.1',
-    15: '1.14.0'
-]
+def dniScannerWebKitByCordova = [15: '1.14.0']
 
 def dniScannerCordovaMajor = dniScannerReadCordovaAndroidMajor()
 def dniScannerCameraXVersion = project.findProperty('dniScannerCameraXVersion')?.toString()
@@ -63,7 +55,7 @@ if (dniScannerCameraXVersion == null || dniScannerCameraXVersion.trim().isEmpty(
 if (dniScannerCameraXVersion == null) {
     throw new GradleException(
         "cordova-plugin-dni-scanner: cordova-android ${dniScannerCordovaMajor} no está soportado. " +
-        'Versiones soportadas: 13, 14 y 15.'
+        'Versión soportada: 15.'
     )
 }
 
@@ -85,5 +77,8 @@ dependencies {
     implementation 'androidx.exifinterface:exifinterface:1.3.2'
     // Public return type of ProcessCameraProvider.getInstance across CameraX 1.4-1.6.
     implementation 'com.google.guava:listenablefuture:1.0'
+    // Bundled local vision engine. It does not require a manager app,
+    // runtime download or Google Play services.
+    implementation 'org.opencv:opencv:4.12.0'
     compileOnly "androidx.webkit:webkit:${dniScannerWebKitByCordova[dniScannerCordovaMajor]}"
 }

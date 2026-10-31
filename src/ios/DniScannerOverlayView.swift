@@ -1,6 +1,10 @@
 import UIKit
 
 final class DNIOverlayView: UIView {
+    private static let progressSegments = 5
+    private static let progressTransitionDuration: CFTimeInterval = 0.26
+    private static let portraitElementGap: CGFloat = 18
+    private static let progressHeight: CGFloat = 8
     private(set) var analysis: DNIAnalysis?
     private var message = "Buscando DNI"
     private var instruction = ""
@@ -8,6 +12,9 @@ final class DNIOverlayView: UIView {
     private var scanOrientation = "portrait"
     private var checks: DNIChecks
     private let profile: DNIScanProfile
+    private var progressStartColors: [UIColor] = []
+    private var progressTargetColors: [UIColor] = []
+    private var progressTransitionStartedAt: [CFTimeInterval] = []
 
     override class var layerClass: AnyClass { CAShapeLayer.self }
 
@@ -80,7 +87,7 @@ final class DNIOverlayView: UIView {
         color.setStroke()
         guidePath.stroke()
 
-        if let current = analysis, let detection = current.detection {
+        if debugMode, let current = analysis, let detection = current.detection {
             let mapped = detection.quad.points.map {
                 mapToView($0, imageWidth: current.imageWidth, imageHeight: current.imageHeight)
             }
@@ -102,7 +109,10 @@ final class DNIOverlayView: UIView {
                 instruction,
                 top: usesLandscapeLayout
                     ? guide.minY + 12
-                    : max(safeAreaInsets.top + 12, guide.minY - height - 14),
+                    : max(
+                        safeAreaInsets.top + 12,
+                        guide.minY - height - Self.portraitElementGap
+                    ),
                 maxWidth: max(120, guide.width - 24),
                 font: font,
                 color: color == colorForState(.searching) ? color : .white,
@@ -112,6 +122,8 @@ final class DNIOverlayView: UIView {
             )
         }
 
+        drawProgress(guide: guide, usesLandscapeLayout: usesLandscapeLayout)
+
         let messageFont = UIFont.systemFont(ofSize: 18, weight: .semibold)
         let messageHeight = ceil(messageFont.lineHeight) + 20
         drawInlineText(
@@ -120,7 +132,10 @@ final class DNIOverlayView: UIView {
                 ? guide.maxY - messageHeight - 12
                 : min(
                     bounds.height - safeAreaInsets.bottom - messageHeight - 8,
-                    guide.maxY + 18
+                    guide.maxY
+                        + Self.portraitElementGap
+                        + Self.progressHeight
+                        + Self.portraitElementGap
                 ),
             maxWidth: max(120, guide.width - 32),
             font: messageFont,
@@ -131,8 +146,105 @@ final class DNIOverlayView: UIView {
         )
 
         if debugMode {
-            drawDebugPanel(guide: guide)
+            drawDebugPanel()
         }
+    }
+
+    private func drawProgress(guide: CGRect, usesLandscapeLayout: Bool) {
+        let completed = progressCompleted()
+        let green = UIColor(red: 0.29, green: 0.87, blue: 0.50, alpha: 1)
+        let intermediate = UIColor(red: 0.64, green: 0.84, blue: 0.29, alpha: 1)
+        let yellow = UIColor(red: 0.98, green: 0.80, blue: 0.08, alpha: 1)
+        let future = UIColor.white.withAlphaComponent(0.40)
+        var targets = (0..<Self.progressSegments).map { index in
+            index < completed || completed == Self.progressSegments
+                ? green : index == completed ? yellow : future
+        }
+        if analysis?.state == .capturing || analysis?.state == .processing {
+            targets[Self.progressSegments - 1] = intermediate
+        }
+
+        let now = CACurrentMediaTime()
+        ensureProgressAnimation(targets, now: now)
+        let totalWidth = min(guide.width * 0.72, 320)
+        let gap: CGFloat = 6
+        let segmentWidth = (totalWidth - gap * CGFloat(Self.progressSegments - 1))
+            / CGFloat(Self.progressSegments)
+        let height = Self.progressHeight
+        let centerY = usesLandscapeLayout
+            ? guide.maxY - 64
+            : guide.maxY + Self.portraitElementGap + height / 2
+        var x = bounds.midX - totalWidth / 2
+        var animating = false
+        for index in 0..<Self.progressSegments {
+            let color = animatedProgressColor(index, now: now)
+            color.setFill()
+            UIBezierPath(
+                roundedRect: CGRect(
+                    x: x,
+                    y: centerY - height / 2,
+                    width: segmentWidth,
+                    height: height
+                ),
+                cornerRadius: height / 2
+            ).fill()
+            animating = animating || !color.isEqual(progressTargetColors[index])
+            x += segmentWidth + gap
+        }
+        if animating { setNeedsDisplay() }
+    }
+
+    private func progressCompleted() -> Int {
+        guard let current = analysis else { return 0 }
+        switch current.state {
+        case .searching, .retrying:
+            return 0
+        case .moveCloser, .moveAway, .centerDocument, .adjustPerspective:
+            return current.detection == nil ? 0 : 1
+        case .improveLighting, .reduceLighting, .avoidGlare, .unevenLighting,
+             .edgeOccluded, .waitingForFocus:
+            return current.detection == nil ? 0 : 2
+        case .holdStill:
+            return 3
+        case .ready, .focusing, .capturing, .processing:
+            return 4
+        case .success:
+            return Self.progressSegments
+        }
+    }
+
+    private func ensureProgressAnimation(_ targets: [UIColor], now: CFTimeInterval) {
+        guard progressTargetColors.count == targets.count else {
+            progressStartColors = targets
+            progressTargetColors = targets
+            progressTransitionStartedAt = Array(repeating: now, count: targets.count)
+            return
+        }
+        for index in targets.indices where !progressTargetColors[index].isEqual(targets[index]) {
+            progressStartColors[index] = animatedProgressColor(index, now: now)
+            progressTargetColors[index] = targets[index]
+            progressTransitionStartedAt[index] = now
+        }
+    }
+
+    private func animatedProgressColor(_ index: Int, now: CFTimeInterval) -> UIColor {
+        var amount = CGFloat(min(1, max(0,
+            (now - progressTransitionStartedAt[index]) / Self.progressTransitionDuration)))
+        amount = amount * amount * (3 - 2 * amount)
+        return blendColor(progressStartColors[index], progressTargetColors[index], amount: amount)
+    }
+
+    private func blendColor(_ from: UIColor, _ to: UIColor, amount: CGFloat) -> UIColor {
+        var fromR: CGFloat = 0, fromG: CGFloat = 0, fromB: CGFloat = 0, fromA: CGFloat = 0
+        var toR: CGFloat = 0, toG: CGFloat = 0, toB: CGFloat = 0, toA: CGFloat = 0
+        from.getRed(&fromR, green: &fromG, blue: &fromB, alpha: &fromA)
+        to.getRed(&toR, green: &toG, blue: &toB, alpha: &toA)
+        return UIColor(
+            red: fromR + (toR - fromR) * amount,
+            green: fromG + (toG - fromG) * amount,
+            blue: fromB + (toB - fromB) * amount,
+            alpha: fromA + (toA - fromA) * amount
+        )
     }
 
     private struct DebugRow {
@@ -142,20 +254,46 @@ final class DNIOverlayView: UIView {
     }
 
     private func debugRows() -> [DebugRow] {
+        var rows = [
+            DebugRow(
+                text: analysis.map { "frame: \($0.imageWidth)x\($0.imageHeight)" } ?? "frame: -",
+                acceptable: true,
+                enabled: false
+            ),
+            DebugRow(text: "profile: \(profile.rawValue)", acceptable: true, enabled: false),
+            DebugRow(
+                text: "state: \(analysis?.state.rawValue ?? "searching")",
+                acceptable: analysis?.state == .ready,
+                enabled: true
+            )
+        ]
         guard let current = analysis,
               let detection = current.detection,
               let quality = current.quality else {
-            return [
-                DebugRow(text: "documento --", acceptable: false, enabled: true),
-                DebugRow(text: "estado buscando", acceptable: false, enabled: true),
-                motionRow(analysis?.motion)
-            ]
+            rows.append(contentsOf: [
+                DebugRow(text: "source: -", acceptable: false, enabled: false),
+                DebugRow(text: "score/aspect: -", acceptable: false, enabled: false),
+                DebugRow(text: "area/center: -", acceptable: false, enabled: checks.documentSize),
+                DebugRow(text: "perspective: -", acceptable: false, enabled: true),
+                DebugRow(text: "focus: -", acceptable: false, enabled: checks.sharpness),
+                DebugRow(text: "light: -", acceptable: false, enabled: checks.brightness),
+                DebugRow(text: "glare: -", acceptable: false, enabled: checks.glare),
+                DebugRow(text: "shadow: -", acceptable: false, enabled: checks.shadows),
+                DebugRow(text: "edge: -", acceptable: false, enabled: checks.edgeOcclusion),
+                DebugRow(
+                    text: "skin: -",
+                    acceptable: false,
+                    enabled: checks.edgeOcclusion && profile == .dni
+                ),
+                DebugRow(text: "hold: -", acceptable: false, enabled: true)
+            ])
+            rows.append(motionRow(analysis?.motion))
+            return rows
         }
 
         let exposureAcceptable = quality.brightness >= DNIEngine.minimumBrightness
-            && quality.brightness <= DNIEngine.maximumBrightness
             && quality.darkClipping <= DNIEngine.maximumDarkClipping
-            && quality.highlightClipping <= DNIEngine.maximumHighlightClipping
+            && !DNIEngine.isOverexposed(quality)
         let shadowAcceptable = quality.illuminationSpread
                 <= DNIEngine.maximumIlluminationSpread(for: profile)
             || quality.shadowBoundary <= DNIEngine.maximumShadowBoundary(for: profile)
@@ -166,32 +304,46 @@ final class DNIOverlayView: UIView {
         let visuallyStable = current.stableFrameCount >= DNIEngine.requiredStableFrames
             && current.stableDurationMs >= DNIEngine.requiredStableDurationMs
 
-        return [
-            DebugRow(text: "detector \(detection.source)", acceptable: true, enabled: false),
+        rows.append(contentsOf: [
+            DebugRow(text: "source: \(detection.source)", acceptable: true, enabled: false),
             DebugRow(
-                text: String(format: "area %.3f", detection.areaFraction),
+                text: String(format: "score/aspect: %.3f/%.3f", detection.score, detection.observedAspect),
+                acceptable: detection.observedAspect >= DNIEngine.minimumObservedAspect,
+                enabled: true
+            ),
+            DebugRow(
+                text: String(
+                    format: "area/center: %.3f/%.3f",
+                    detection.areaFraction,
+                    detection.centerOffset
+                ),
                 acceptable: detection.areaFraction >= DNIEngine.minimumDocumentArea
-                    && detection.areaFraction <= DNIEngine.maximumDocumentArea,
-                enabled: checks.documentSize
+                    && detection.areaFraction <= DNIEngine.maximumDocumentArea
+                    && detection.centerOffset <= DNIEngine.maximumCenterOffset,
+                enabled: checks.documentSize || checks.centering
             ),
             DebugRow(
-                text: String(format: "centro %.3f", detection.centerOffset),
-                acceptable: detection.centerOffset <= DNIEngine.maximumCenterOffset,
-                enabled: checks.centering
+                text: String(
+                    format: "geometry: p%.2f r%.2f deg",
+                    detection.quad.maximumPerspectiveDeviationDegrees,
+                    detection.quad.maximumInPlaneRotationDegrees
+                ),
+                acceptable: detection.quad.hasAcceptablePerspective(
+                    freeLimit: DNIEngine.maximumRectangleDeviationDegrees,
+                    symmetricLimit: DNIEngine.maximumSymmetricPerspectiveDeviationDegrees,
+                    symmetryTolerance: DNIEngine.maximumTrapezoidSymmetryErrorDegrees
+                ) && detection.quad.maximumInPlaneRotationDegrees
+                    <= DNIEngine.maximumInPlaneRotationDegrees,
+                enabled: true
             ),
             DebugRow(
-                text: String(format: "persp %.3f", quality.perspective),
-                acceptable: quality.perspective >= DNIEngine.minimumPerspectiveScore,
-                enabled: checks.perspective
-            ),
-            DebugRow(
-                text: String(format: "foco %.0f", quality.sharpness),
+                text: String(format: "focus: %.0f", quality.sharpness),
                 acceptable: quality.sharpness >= DNIEngine.minimumSharpness,
                 enabled: checks.sharpness
             ),
             DebugRow(
                 text: String(
-                    format: "luz %.0f d%.2f c%.2f",
+                    format: "light: %.0f d%.2f c%.2f",
                     quality.brightness,
                     quality.darkClipping,
                     quality.highlightClipping
@@ -200,13 +352,13 @@ final class DNIOverlayView: UIView {
                 enabled: checks.brightness
             ),
             DebugRow(
-                text: String(format: "glare %.3f", quality.glare),
+                text: String(format: "glare: %.3f", quality.glare),
                 acceptable: quality.glare <= DNIEngine.maximumGlare(for: profile),
                 enabled: checks.glare
             ),
             DebugRow(
                 text: String(
-                    format: "sombra %.3f/%.3f",
+                    format: "shadow: %.3f/%.3f",
                     quality.illuminationSpread,
                     quality.shadowBoundary
                 ),
@@ -215,7 +367,7 @@ final class DNIOverlayView: UIView {
             ),
             DebugRow(
                 text: String(
-                    format: "borde gap %.2f warm %.2f",
+                    format: "edge: %.2f warm %.2f",
                     quality.edgeGap,
                     quality.edgeObstruction
                 ),
@@ -223,13 +375,13 @@ final class DNIOverlayView: UIView {
                 enabled: checks.edgeOcclusion
             ),
             DebugRow(
-                text: String(format: "piel cruza %.3f", quality.skinEdgeObstruction),
+                text: String(format: "skin: %.3f", quality.skinEdgeObstruction),
                 acceptable: profile == .genericCard || skinAcceptable,
                 enabled: checks.edgeOcclusion && profile == .dni
             ),
             DebugRow(
                 text: String(
-                    format: "visual %df %dms",
+                    format: "hold: %df/%dms",
                     current.stableFrameCount,
                     current.stableDurationMs
                 ),
@@ -237,49 +389,39 @@ final class DNIOverlayView: UIView {
                 enabled: checks.stability
             ),
             motionRow(current.motion)
-        ]
+        ])
+        return rows
     }
 
     private func motionRow(_ motion: DNIMotionSnapshot?) -> DebugRow {
         guard let motion = motion else {
-            return DebugRow(text: "movimiento --", acceptable: false, enabled: false)
+            return DebugRow(text: "motion: -", acceptable: false, enabled: checks.stability)
         }
         let gyroscope = motion.gyroscopeRadPerSecond.map { String(format: "%.3f", $0) } ?? "--"
         let acceleration = motion.linearAcceleration.map { String(format: "%.3f", $0) } ?? "--"
         return DebugRow(
-            text: "mov g\(gyroscope) a\(acceleration) \(motion.quietDurationMs)ms",
+            text: "motion: g\(gyroscope) a\(acceleration) \(motion.quietDurationMs)ms",
             acceptable: motion.stable,
             enabled: checks.stability && motion.sensorAvailable && motion.sampling
         )
     }
 
-    private func drawDebugPanel(guide: CGRect) {
+    private func drawDebugPanel() {
+        // Diagnostics are an absolute overlay and intentionally ignore the
+        // guide, progress indicator, and status-label layout.
         let rows = debugRows()
         let landscape = bounds.width > bounds.height
-        let columns = landscape ? 1 : 2
+        let columns = 2
         let rowsPerColumn = Int(ceil(Double(rows.count) / Double(columns)))
-        let font = UIFont.monospacedSystemFont(ofSize: 11, weight: .medium)
-        let lineHeight: CGFloat = 14
-        let padding: CGFloat = 7
-        let panelWidth: CGFloat
-        let left: CGFloat
-        let top: CGFloat
-        if landscape {
-            let availableLeft = max(120, guide.minX - 22)
-            panelWidth = min(210, availableLeft - 10)
-            left = max(8, guide.minX - panelWidth - 12)
-            top = max(70, guide.minY)
-        } else {
-            panelWidth = min(guide.width, bounds.width - 24)
-            left = (bounds.width - panelWidth) * 0.5
-            top = min(
-                bounds.height - CGFloat(rowsPerColumn) * lineHeight - padding * 2 - 8,
-                guide.maxY + 92
-            )
-        }
+        let font = UIFont.monospacedSystemFont(ofSize: 9, weight: .medium)
+        let lineHeight: CGFloat = 12
+        let padding: CGFloat = 6
+        let panelWidth = min(landscape ? 360 : 310, bounds.width - 16)
+        let left: CGFloat = 8
         let panelHeight = CGFloat(rowsPerColumn) * lineHeight + padding * 2
+        let top = bounds.height - safeAreaInsets.bottom - panelHeight - 8
         let panel = CGRect(x: left, y: top, width: panelWidth, height: panelHeight)
-        UIColor.black.withAlphaComponent(0.72).setFill()
+        UIColor.black.withAlphaComponent(0.36).setFill()
         UIBezierPath(roundedRect: panel, cornerRadius: 7).fill()
 
         let columnWidth = (panelWidth - padding * 2) / CGFloat(columns)
@@ -374,12 +516,14 @@ final class DNIOverlayView: UIView {
 
     private func colorForState(_ state: DNIAnalysisState) -> UIColor {
         switch state {
-        case .ready, .capturing:
-            return UIColor(red: 0.31, green: 0.95, blue: 0.45, alpha: 1)
-        case .holdStill, .waitingForFocus:
-            return UIColor(red: 1, green: 0.82, blue: 0.25, alpha: 1)
+        case .holdStill, .waitingForFocus, .ready, .capturing, .processing, .success:
+            return UIColor(red: 0.29, green: 0.87, blue: 0.50, alpha: 1)
+        case .searching, .retrying:
+            return UIColor(red: 0.94, green: 0.27, blue: 0.27, alpha: 1)
+        case .focusing:
+            return UIColor(red: 0.98, green: 0.80, blue: 0.08, alpha: 1)
         default:
-            return UIColor(red: 1, green: 0.35, blue: 0.35, alpha: 1)
+            return UIColor(red: 0.98, green: 0.80, blue: 0.08, alpha: 1)
         }
     }
 }

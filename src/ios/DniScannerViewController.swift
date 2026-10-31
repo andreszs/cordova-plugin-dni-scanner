@@ -21,9 +21,14 @@ final class DNIViewController: UIViewController {
     private let sessionQueue = DispatchQueue(label: "com.crediser.dniscanner.ios.session")
     private let analysisQueue = DispatchQueue(label: "com.crediser.dniscanner.ios.analysis", qos: .userInitiated)
     private let processingQueue = DispatchQueue(label: "com.crediser.dniscanner.ios.processing", qos: .userInitiated)
-    private let engine = DNIEngine()
+    private let tracker = DNIDocumentTracker()
+    private let geometryEngine = DNIEngine()
     private let stillProcessor = DNIStillProcessor()
     private let motionMonitor = DNIMotionMonitor()
+    private let instructionStateStabilizer = DNIInstructionStateStabilizer(
+        confirmationDuration: 0.5,
+        lossGraceDuration: 0.3
+    )
     private let stateLock = NSLock()
     private let geometryLock = NSLock()
 
@@ -31,6 +36,7 @@ final class DNIViewController: UIViewController {
     private var overlayView: DNIOverlayView!
     private var closeButton: UIButton?
     private var flashButton: UIButton?
+    private var captureButton: UIButton?
     private var videoOutput: AVCaptureVideoDataOutput?
     private var photoOutput: AVCapturePhotoOutput?
     private var selectedPhotoDimensions: CMVideoDimensions?
@@ -38,13 +44,16 @@ final class DNIViewController: UIViewController {
     private var currentFlashMode: String
     private var lastAnalysisTime: CFTimeInterval = 0
     private var captureInProgress = false
+    private var analysisSuspended = false
     private var completed = false
     private var orientationTransitionInProgress = false
     private var captureOrientationState = DNICaptureOrientationState()
-    private var previousQuad: DNIQuad?
-    private var previousArea: CGFloat = 0
-    private var stableSince: CFTimeInterval = 0
-    private var stableFrames = 0
+    private var latestTrackedAnalysis: DNIAnalysis?
+    private var latestAnalysisTime: CFTimeInterval = 0
+    private var captureReferenceQuad: DNIQuad?
+    private var capturedPreviewAnalysis: DNIAnalysis?
+    private var manualCaptureRequested = false
+    private var lastWarmFocusTime: CFTimeInterval = 0
     private var timeoutWorkItem: DispatchWorkItem?
     private var previewAspectRatio: CGFloat = 16 / 9
     private var normalizedGuideRegion = CGRect(x: 0.13, y: 0.12, width: 0.74, height: 0.76)
@@ -210,6 +219,15 @@ final class DNIViewController: UIViewController {
                 button.heightAnchor.constraint(equalToConstant: 44)
             ])
         }
+        let capture = makeButton(title: "Capturar")
+        capture.addTarget(self, action: #selector(captureManually), for: .touchUpInside)
+        view.addSubview(capture)
+        captureButton = capture
+        NSLayoutConstraint.activate([
+            capture.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            capture.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            capture.heightAnchor.constraint(equalToConstant: 44)
+        ])
     }
 
     private func makeButton(title: String) -> UIButton {
@@ -392,58 +410,32 @@ final class DNIViewController: UIViewController {
 
     private func handleAnalysis(_ raw: DNIAnalysis) {
         var analysis = raw
-        if raw.state == .ready, let detection = raw.detection, options.checks.stability {
-            let now = CACurrentMediaTime()
-            let stable: Bool
-            if let previous = previousQuad {
-                let diagonal = hypot(CGFloat(raw.imageWidth), CGFloat(raw.imageHeight))
-                let pairs = zip(previous.points, detection.quad.points)
-                let meanSquared = pairs.reduce(CGFloat(0)) { value, pair in
-                    let motion = pair.0.distance(to: pair.1) / max(1, diagonal)
-                    return value + motion * motion
-                } / 4
-                let areaChange = previousArea <= 0 ? 1 : abs(detection.quad.area - previousArea) / previousArea
-                stable = sqrt(meanSquared) <= 0.018 && areaChange <= 0.035
-            } else {
-                stable = false
-            }
-            if stable {
-                stableFrames += 1
-            } else {
-                stableFrames = 1
-                stableSince = now
-            }
-            previousQuad = detection.quad
-            previousArea = detection.quad.area
-            let duration = Int(max(0, now - stableSince) * 1000)
-            analysis.stableFrameCount = stableFrames
-            analysis.stableDurationMs = duration
-            if stableFrames < DNIEngine.requiredStableFrames
-                || duration < DNIEngine.requiredStableDurationMs {
-                analysis = DNIAnalysis(
-                    state: .holdStill,
-                    detection: raw.detection,
-                    quality: raw.quality,
-                    imageWidth: raw.imageWidth,
-                    imageHeight: raw.imageHeight,
-                    stableFrameCount: stableFrames,
-                    stableDurationMs: duration
-                )
-            }
-        } else if raw.state != .ready {
-            resetStability()
-        }
-
         let motion = motionMonitor.snapshot()
         analysis.motion = motion
         if options.checks.stability, analysis.state == .ready, !motion.stable {
             analysis.state = .holdStill
         }
+        stateLock.lock()
+        latestTrackedAnalysis = analysis
+        latestAnalysisTime = CACurrentMediaTime()
+        stateLock.unlock()
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self, !self.isCompleted, !self.isCapturing else { return }
-            self.overlayView.update(analysis, message: self.message(for: analysis.state))
-            if analysis.state == .ready {
+            let instructionState = self.instructionStateStabilizer.update(
+                candidate: analysis.state,
+                at: CACurrentMediaTime()
+            )
+            var visibleAnalysis = analysis
+            visibleAnalysis.state = instructionState
+            self.overlayView.update(
+                visibleAnalysis,
+                message: self.message(for: instructionState)
+            )
+            if analysis.state == .holdStill && analysis.stableDurationMs >= 180 {
+                self.warmFocus(at: analysis)
+            }
+            if self.options.autoCapture && analysis.state == .ready {
                 self.beginAutomaticCapture(analysis)
             }
         }
@@ -453,6 +445,12 @@ final class DNIViewController: UIViewController {
         stateLock.lock()
         defer { stateLock.unlock() }
         return captureInProgress
+    }
+
+    private var isAnalysisSuspended: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return analysisSuspended
     }
 
     private var lockedCaptureOrientation: DNIEffectiveOrientation? {
@@ -515,29 +513,40 @@ final class DNIViewController: UIViewController {
     }
 
     private func beginAutomaticCapture(_ analysis: DNIAnalysis) {
+        beginCapture(analysis, manual: false)
+    }
+
+    @objc private func captureManually() {
+        guard !isCompleted, !isCapturing else { return }
+        let analysis = latestAnalysisSnapshot().analysis ?? DNIAnalysis(
+            state: .searching,
+            detection: nil,
+            quality: nil,
+            imageWidth: 0,
+            imageHeight: 0
+        )
+        beginCapture(analysis, manual: true)
+    }
+
+    private func beginCapture(_ analysis: DNIAnalysis, manual: Bool) {
         guard !isCapturing, !isCompleted, !isOrientationTransitioning,
               photoOutput != nil else { return }
-        if options.checks.stability, !motionMonitor.beginCapture() {
+        if !manual, options.checks.stability, !motionMonitor.beginCapture() {
             resetStability()
             overlayView.update(analysis, message: message(for: .holdStill))
             return
         }
         lockCaptureOrientation()
         setCapturing(true)
-        var capturing = analysis
-        capturing = DNIAnalysis(
-            state: .capturing,
-            detection: analysis.detection,
-            quality: analysis.quality,
-            imageWidth: analysis.imageWidth,
-            imageHeight: analysis.imageHeight,
-            stableFrameCount: analysis.stableFrameCount,
-            stableDurationMs: analysis.stableDurationMs,
-            motion: analysis.motion
-        )
-        overlayView.update(capturing, message: "📷 Tomando foto, no muevas el celular")
+        manualCaptureRequested = manual
+        captureReferenceQuad = analysis.detection?.quad
+        captureButton?.isEnabled = false
+        var focusing = analysis
+        focusing.state = .focusing
+        instructionStateStabilizer.force(.focusing)
+        overlayView.update(focusing, message: "Enfocando…")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
-            self?.focusAndMeterThenCapture(capturing)
+            self?.focusAndMeterThenCapture(focusing)
         }
     }
 
@@ -625,6 +634,11 @@ final class DNIViewController: UIViewController {
         }
         stateLock.unlock()
         guard mayCapture else { return }
+        if !manualCaptureRequested && !hasFreshCaptureGeometry() {
+            retry(message: message(for: .holdStill))
+            return
+        }
+        showCaptureStage(.capturing, message: "Tomando foto")
         capturePhoto()
     }
 
@@ -637,11 +651,12 @@ final class DNIViewController: UIViewController {
             fail(.captureFailed("La salida fotográfica dejó de estar disponible.", true))
             return
         }
-        if options.checks.stability, !motionMonitor.captureMayProceed() {
+        if !manualCaptureRequested, options.checks.stability, !motionMonitor.captureMayProceed() {
             motionMonitor.cancelCapture()
             resumeAfterMotion()
             return
         }
+        capturedPreviewAnalysis = latestAnalysisSnapshot().analysis
         let settings: AVCapturePhotoSettings
         if output.availablePhotoCodecTypes.contains(.jpeg) {
             settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
@@ -667,7 +682,15 @@ final class DNIViewController: UIViewController {
             guard let self = self, !self.isCompleted else { return }
             do {
                 let directory = try self.cacheDirectory()
-                let scan = try self.stillProcessor.process(data: data, options: self.options, directory: directory)
+                let preview = self.capturedPreviewAnalysis
+                let scan = try self.stillProcessor.process(
+                    data: data,
+                    options: self.options,
+                    directory: directory,
+                    previewDetection: preview?.detection,
+                    previewWidth: preview?.imageWidth ?? 0,
+                    previewHeight: preview?.imageHeight ?? 0
+                )
                 if self.options.profile == .dni
                     && self.options.sideValidation == .strict
                     && scan.recognition.side != self.options.side {
@@ -676,7 +699,7 @@ final class DNIViewController: UIViewController {
                     let message = scan.recognition.side == "unknown"
                         ? "No se pudo confirmar el \(requested)"
                         : "⚠ Mostrá el \(requested) del DNI"
-                    DispatchQueue.main.async { self.retry(message: message, delay: 2.2) }
+                    DispatchQueue.main.async { self.retry(message: message) }
                     return
                 }
                 DispatchQueue.main.async {
@@ -684,7 +707,7 @@ final class DNIViewController: UIViewController {
                 }
             } catch DNIError.retry(let message, let state) {
                 DispatchQueue.main.async {
-                    self.retry(message: self.message(for: state, fallback: message), delay: 0.9)
+                    self.retry(message: self.message(for: state, fallback: message))
                 }
             } catch let error as DNIError {
                 DispatchQueue.main.async { self.fail(error) }
@@ -696,32 +719,109 @@ final class DNIViewController: UIViewController {
         }
     }
 
-    private func retry(message: String, delay: TimeInterval) {
+    private func retry(message: String) {
         guard !isCompleted else { return }
         motionMonitor.cancelCapture()
         releaseCaptureOrientation(preservingCapturedOrientation: false)
         resetStability()
-        overlayView.update(nil, message: message)
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        showCaptureStage(.retrying, message: message)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self = self, !self.isCompleted else { return }
             self.setCapturing(false)
+            self.stateLock.lock()
+            self.analysisSuspended = false
+            self.stateLock.unlock()
+            self.manualCaptureRequested = false
+            self.captureReferenceQuad = nil
+            self.captureButton?.isEnabled = true
+            self.instructionStateStabilizer.force(.searching)
             self.overlayView.update(nil, message: "Buscando DNI")
         }
     }
 
     private func resetStability() {
-        previousQuad = nil
-        previousArea = 0
-        stableSince = 0
-        stableFrames = 0
+        analysisQueue.async { [weak self] in
+            self?.tracker.reset()
+        }
     }
 
     private func resumeAfterMotion() {
         guard !isCompleted else { return }
         resetStability()
         setCapturing(false)
+        manualCaptureRequested = false
+        captureReferenceQuad = nil
+        captureButton?.isEnabled = true
         releaseCaptureOrientation(preservingCapturedOrientation: false)
+        instructionStateStabilizer.force(.holdStill)
         overlayView.update(nil, message: message(for: .holdStill))
+    }
+
+    private func showCaptureStage(_ state: DNIAnalysisState, message: String) {
+        instructionStateStabilizer.force(state)
+        guard var stage = overlayView.analysis else {
+            overlayView.update(nil, message: message)
+            return
+        }
+        stage.state = state
+        overlayView.update(stage, message: message)
+    }
+
+    private func hasFreshCaptureGeometry() -> Bool {
+        let snapshot = latestAnalysisSnapshot()
+        guard let reference = captureReferenceQuad,
+              let latest = snapshot.analysis,
+              let detection = latest.detection,
+              CACurrentMediaTime() - snapshot.time <= 0.55,
+              latest.state == .ready || latest.state == .holdStill,
+              latest.imageWidth > 0, latest.imageHeight > 0 else { return false }
+        return geometryEngine.quadDistance(
+            reference,
+            detection.quad,
+            width: latest.imageWidth,
+            height: latest.imageHeight
+        ) <= 0.045
+    }
+
+    private func latestAnalysisSnapshot() -> (analysis: DNIAnalysis?, time: CFTimeInterval) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return (latestTrackedAnalysis, latestAnalysisTime)
+    }
+
+    private func warmFocus(at analysis: DNIAnalysis) {
+        let now = CACurrentMediaTime()
+        guard now - lastWarmFocusTime >= 0.9,
+              let detection = analysis.detection,
+              analysis.imageWidth > 0, analysis.imageHeight > 0,
+              let camera = camera else { return }
+        lastWarmFocusTime = now
+        let layerPoint = overlayView.mapToView(
+            detection.quad.center,
+            imageWidth: analysis.imageWidth,
+            imageHeight: analysis.imageHeight
+        )
+        let devicePoint = previewLayer.captureDevicePointConverted(fromLayerPoint: layerPoint)
+        sessionQueue.async {
+            do {
+                try camera.lockForConfiguration()
+                if camera.isFocusPointOfInterestSupported {
+                    camera.focusPointOfInterest = devicePoint
+                    if camera.isFocusModeSupported(.continuousAutoFocus) {
+                        camera.focusMode = .continuousAutoFocus
+                    }
+                }
+                if camera.isExposurePointOfInterestSupported {
+                    camera.exposurePointOfInterest = devicePoint
+                    if camera.isExposureModeSupported(.continuousAutoExposure) {
+                        camera.exposureMode = .continuousAutoExposure
+                    }
+                }
+                camera.unlockForConfiguration()
+            } catch {
+                // Manual capture and the bounded focus pass remain available.
+            }
+        }
     }
 
     private func cacheDirectory() throws -> URL {
@@ -761,6 +861,7 @@ final class DNIViewController: UIViewController {
             stateLock.unlock()
             return
         }
+        showCaptureStage(.success, message: "✓ Listo")
         completed = true
         stateLock.unlock()
         timeoutWorkItem?.cancel()
@@ -769,17 +870,15 @@ final class DNIViewController: UIViewController {
         motionMonitor.stop()
         if options.beepEnabled {
             successBeep.play()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-                guard let self = self else { return }
-                self.delegate?.dniScanner(
-                    self,
-                    didFinish: scan,
-                    flashFired: flashFired,
-                    motion: motion
-                )
-            }
-        } else {
-            delegate?.dniScanner(self, didFinish: scan, flashFired: flashFired, motion: motion)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) { [weak self] in
+            guard let self = self else { return }
+            self.delegate?.dniScanner(
+                self,
+                didFinish: scan,
+                flashFired: flashFired,
+                motion: motion
+            )
         }
     }
 
@@ -851,7 +950,11 @@ final class DNIViewController: UIViewController {
         case .holdStill: return "Mantené el celular quieto"
         case .waitingForFocus: return "Esperando enfoque"
         case .ready: return "Listo"
-        case .capturing: return "📷 Tomando foto, no muevas el celular"
+        case .focusing: return "Enfocando…"
+        case .capturing: return "Tomando foto"
+        case .processing: return "Procesando imagen…"
+        case .retrying: return "Reintentando captura"
+        case .success: return "✓ Listo"
         }
     }
 }
@@ -862,7 +965,7 @@ extension DNIViewController: AVCaptureVideoDataOutputSampleBufferDelegate {
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        guard !isCompleted, !isCapturing, !isOrientationTransitioning else { return }
+        guard !isCompleted, !isOrientationTransitioning, !isAnalysisSuspended else { return }
         let now = CACurrentMediaTime()
         guard now - lastAnalysisTime >= 0.10 else { return }
         lastAnalysisTime = now
@@ -873,11 +976,12 @@ extension DNIViewController: AVCaptureVideoDataOutputSampleBufferDelegate {
                 maxDimension: 512,
                 viewportAspectRatio: geometry.aspectRatio
             )
-            let result = try engine.analyze(
+            let result = try tracker.update(
                 raster: raster,
                 checks: options.checks,
                 allowedRegion: geometry.guide,
-                profile: options.profile
+                profile: options.profile,
+                at: now
             )
             handleAnalysis(result)
         } catch {
@@ -896,14 +1000,8 @@ extension DNIViewController: AVCapturePhotoCaptureDelegate {
         error: Error?
     ) {
         let motionSnapshot: DNIMotionSnapshot
-        if options.checks.stability {
+        if options.checks.stability && !manualCaptureRequested {
             let motionOutcome = motionMonitor.finishCapture()
-            if !motionOutcome.accepted {
-                DispatchQueue.main.async { [weak self] in
-                    self?.resumeAfterMotion()
-                }
-                return
-            }
             motionSnapshot = motionOutcome.snapshot
         } else {
             motionSnapshot = motionMonitor.snapshot()
@@ -925,6 +1023,10 @@ extension DNIViewController: AVCapturePhotoCaptureDelegate {
                 self.fail(.captureFailed("La cámara no devolvió la fotografía capturada.", true))
                 return
             }
+            self.stateLock.lock()
+            self.analysisSuspended = true
+            self.stateLock.unlock()
+            self.showCaptureStage(.processing, message: "Procesando imagen…")
             self.processPhoto(data, flashFired: flashFired)
         }
     }

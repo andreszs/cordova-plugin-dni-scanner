@@ -1,9 +1,6 @@
 package com.crediser.plugins.dniscanner;
 
 import android.graphics.Bitmap;
-import android.graphics.Canvas;
-import android.graphics.Matrix;
-import android.graphics.Paint;
 import android.graphics.PointF;
 
 final class PerspectiveTransformer {
@@ -13,56 +10,62 @@ final class PerspectiveTransformer {
         this.config = config;
     }
 
-    Bitmap transform(Bitmap source, DocumentQuad originalQuad) {
-        if (!hasSufficientSourceMargin(
-                originalQuad,
-                source.getWidth(),
-                source.getHeight())) {
-            throw new IllegalArgumentException(
-                "No hay margen suficiente alrededor de los cuatro bordes del documento."
-            );
-        }
-        DocumentQuad quad = expandedQuad(
+    Bitmap cropWithoutWarp(Bitmap source, DocumentQuad originalQuad) {
+        DocumentQuad expanded = expandedQuad(
             originalQuad,
             config.cropPaddingFraction,
             source.getWidth(),
             source.getHeight(),
-            0f
+            config.cropIntegrityGuardPixels
         );
-        if (quad == null) {
-            throw new IllegalArgumentException("No se pudo expandir el recorte del documento.");
+        if (expanded == null) {
+            throw new IllegalArgumentException(
+                "No hay margen suficiente alrededor de los cuatro bordes del documento."
+            );
         }
-        int naturalWidth = effectiveDocumentLongEdge(quad);
-        int targetWidth = Math.min(config.maxOutputLongEdge, naturalWidth);
-        targetWidth = Math.max(1, targetWidth);
-        int targetHeight = Math.max(1, Math.round(targetWidth / config.expectedDocumentAspect));
+        int left = Math.max(0, (int) Math.floor(minimumX(expanded)));
+        int top = Math.max(0, (int) Math.floor(minimumY(expanded)));
+        int right = Math.min(source.getWidth(), (int) Math.ceil(maximumX(expanded)) + 1);
+        int bottom = Math.min(source.getHeight(), (int) Math.ceil(maximumY(expanded)) + 1);
+        int width = right - left;
+        int height = bottom - top;
+        if (width < 2 || height < 2) {
+            throw new IllegalArgumentException("El recorte detectado no tiene dimensiones válidas.");
+        }
+        Bitmap cropped = Bitmap.createBitmap(source, left, top, width, height);
+        int longEdge = Math.max(width, height);
+        if (longEdge <= config.maxOutputLongEdge) {
+            return cropped;
+        }
+        float scale = config.maxOutputLongEdge / (float) longEdge;
+        Bitmap resized = Bitmap.createScaledBitmap(
+            cropped,
+            Math.max(1, Math.round(width * scale)),
+            Math.max(1, Math.round(height * scale)),
+            true
+        );
+        cropped.recycle();
+        return resized;
+    }
 
-        float[] sourcePoints = {
-            quad.topLeft.x, quad.topLeft.y,
-            quad.topRight.x, quad.topRight.y,
-            quad.bottomRight.x, quad.bottomRight.y,
-            quad.bottomLeft.x, quad.bottomLeft.y
-        };
-        float[] destinationPoints = {
-            0f, 0f,
-            targetWidth - 1f, 0f,
-            targetWidth - 1f, targetHeight - 1f,
-            0f, targetHeight - 1f
-        };
-        Matrix transform = new Matrix();
-        if (!transform.setPolyToPoly(sourcePoints, 0, destinationPoints, 0, 4)) {
-            throw new IllegalArgumentException("No se pudo calcular la homografía.");
-        }
-        Bitmap output = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(output);
-        Paint paint = new Paint(
-            Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG
-        );
-        // Canvas delegates the projective sampling to Android's native graphics
-        // engine. This preserves bilinear color output while avoiding millions of
-        // Java-level divisions and interpolations on legacy ARM processors.
-        canvas.drawBitmap(source, transform, paint);
-        return output;
+    private float minimumX(DocumentQuad quad) {
+        return Math.min(Math.min(quad.topLeft.x, quad.topRight.x),
+            Math.min(quad.bottomRight.x, quad.bottomLeft.x));
+    }
+
+    private float maximumX(DocumentQuad quad) {
+        return Math.max(Math.max(quad.topLeft.x, quad.topRight.x),
+            Math.max(quad.bottomRight.x, quad.bottomLeft.x));
+    }
+
+    private float minimumY(DocumentQuad quad) {
+        return Math.min(Math.min(quad.topLeft.y, quad.topRight.y),
+            Math.min(quad.bottomRight.y, quad.bottomLeft.y));
+    }
+
+    private float maximumY(DocumentQuad quad) {
+        return Math.max(Math.max(quad.topLeft.y, quad.topRight.y),
+            Math.max(quad.bottomRight.y, quad.bottomLeft.y));
     }
 
     int effectiveDocumentLongEdge(DocumentQuad quad) {

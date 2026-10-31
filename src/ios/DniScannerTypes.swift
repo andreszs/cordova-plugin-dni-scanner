@@ -67,7 +67,9 @@ struct DNIChecks {
         }
         documentSize = bool("documentSize", true)
         centering = bool("centering", true)
-        perspective = bool("perspective", true)
+        // Kept as an accepted input for API compatibility, but geometric
+        // perspective integrity is now a mandatory capture requirement.
+        perspective = true
         stability = bool("stability", true)
         sharpness = bool("sharpness", true)
         brightness = bool("brightness", true)
@@ -146,6 +148,7 @@ struct DNIOptions {
     let showFlashButton: Bool
     let debugMode: Bool
     let beepEnabled: Bool
+    let autoCapture: Bool
     let preferredCaptureLongEdge: Int
     let maxOutputLongEdge: Int
     let minEffectiveDocumentLongEdge: Int
@@ -177,12 +180,6 @@ struct DNIOptions {
         if profile == .genericCard && sideValidation != .off {
             throw DNIError.invalidArgument("Para profile='genericCard', sideValidation debe ser 'off'.")
         }
-        if let autoCapture = dictionary["autoCapture"] {
-            guard let enabled = autoCapture as? Bool, enabled else {
-                throw DNIError.invalidArgument("La versión actual sólo admite autoCapture=true.")
-            }
-        }
-
         let flashMode = dictionary["flashMode"] as? String ?? "off"
         guard ["off", "auto", "on"].contains(flashMode) else {
             throw DNIError.invalidArgument("La opción flashMode debe ser 'off', 'auto' u 'on'.")
@@ -303,8 +300,9 @@ struct DNIOptions {
         self.orientation = orientation
         self.showCloseButton = try strictBool("showCloseButton", fallback: true)
         self.showFlashButton = try strictBool("showFlashButton", fallback: true)
-        self.debugMode = try strictBool("debugMode", fallback: true)
+        self.debugMode = try strictBool("debugMode", fallback: false)
         self.beepEnabled = try strictBool("beepEnabled", fallback: true)
+        self.autoCapture = try strictBool("autoCapture", fallback: true)
         self.preferredCaptureLongEdge = preferred
         self.maxOutputLongEdge = output
         self.minEffectiveDocumentLongEdge = minimumEffective
@@ -422,6 +420,73 @@ struct DNIQuad {
     var leftHeight: CGFloat { topLeft.distance(to: bottomLeft) }
     var rightHeight: CGFloat { topRight.distance(to: bottomRight) }
 
+    var maximumPerspectiveDeviationDegrees: CGFloat {
+        guard let deviations = cornerAngleDeviationsDegrees else { return 90 }
+        return deviations.reduce(0) { max($0, abs($1)) }
+    }
+
+    var maximumInPlaneRotationDegrees: CGFloat {
+        return max(
+            abs(Self.lineRotationDegrees(from: topLeft, to: topRight)),
+            abs(Self.lineRotationDegrees(from: bottomLeft, to: bottomRight))
+        )
+    }
+
+    func hasAcceptablePerspective(
+        freeLimit: CGFloat,
+        symmetricLimit: CGFloat,
+        symmetryTolerance: CGFloat
+    ) -> Bool {
+        guard let deviations = cornerAngleDeviationsDegrees else { return false }
+        let maximum = deviations.reduce(0) { max($0, abs($1)) }
+        if maximum <= freeLimit { return true }
+        if maximum > symmetricLimit { return false }
+
+        func maximum(_ values: CGFloat...) -> CGFloat {
+            values.max() ?? .greatestFiniteMagnitude
+        }
+        let horizontalAxisError = maximum(
+            abs(deviations[0] - deviations[1]),
+            abs(deviations[2] - deviations[3]),
+            abs(deviations[0] + deviations[3]),
+            abs(deviations[1] + deviations[2])
+        )
+        let verticalAxisError = maximum(
+            abs(deviations[1] - deviations[2]),
+            abs(deviations[3] - deviations[0]),
+            abs(deviations[1] + deviations[0]),
+            abs(deviations[2] + deviations[3])
+        )
+        return min(horizontalAxisError, verticalAxisError) <= symmetryTolerance
+    }
+
+    private var cornerAngleDeviationsDegrees: [CGFloat]? {
+        var deviations: [CGFloat] = []
+        let corners = points
+        for index in corners.indices {
+            let previous = corners[(index + 3) % corners.count]
+            let current = corners[index]
+            let next = corners[(index + 1) % corners.count]
+            let first = CGPoint(x: previous.x - current.x, y: previous.y - current.y)
+            let second = CGPoint(x: next.x - current.x, y: next.y - current.y)
+            let denominator = hypot(first.x, first.y) * hypot(second.x, second.y)
+            guard denominator >= 0.0001 else { return nil }
+            let cosine = max(-1, min(1,
+                (first.x * second.x + first.y * second.y) / denominator
+            ))
+            let angle = acos(cosine) * 180 / .pi
+            deviations.append(angle - 90)
+        }
+        return deviations
+    }
+
+    private static func lineRotationDegrees(from start: CGPoint, to end: CGPoint) -> CGFloat {
+        var angle = atan2(end.y - start.y, end.x - start.x) * 180 / .pi
+        while angle > 90 { angle -= 180 }
+        while angle < -90 { angle += 180 }
+        return angle
+    }
+
     func scaled(x: CGFloat, y: CGFloat) -> DNIQuad {
         func scale(_ point: CGPoint) -> CGPoint { CGPoint(x: point.x * x, y: point.y * y) }
         return DNIQuad(
@@ -535,7 +600,54 @@ enum DNIAnalysisState: String {
     case holdStill
     case waitingForFocus
     case ready
+    case focusing
     case capturing
+    case processing
+    case retrying
+    case success
+}
+
+/// Stabilizes only the visible instruction. Analysis and automatic capture keep
+/// consuming the current, unfiltered state.
+final class DNIInstructionStateStabilizer {
+    private let confirmationDuration: TimeInterval
+    private let lossGraceDuration: TimeInterval
+    private var visibleState: DNIAnalysisState = .searching
+    private var pendingState: DNIAnalysisState?
+    private var pendingSince: TimeInterval = 0
+
+    init(confirmationDuration: TimeInterval, lossGraceDuration: TimeInterval? = nil) {
+        self.confirmationDuration = max(0, confirmationDuration)
+        self.lossGraceDuration = max(0, lossGraceDuration ?? confirmationDuration)
+    }
+
+    func update(candidate: DNIAnalysisState, at timestamp: TimeInterval) -> DNIAnalysisState {
+        if candidate == visibleState {
+            pendingState = nil
+            pendingSince = 0
+            return visibleState
+        }
+        if candidate != pendingState {
+            pendingState = candidate
+            pendingSince = timestamp
+            return visibleState
+        }
+        let requiredDuration = candidate == .searching
+            ? lossGraceDuration
+            : confirmationDuration
+        if timestamp - pendingSince >= requiredDuration {
+            visibleState = candidate
+            pendingState = nil
+            pendingSince = 0
+        }
+        return visibleState
+    }
+
+    func force(_ state: DNIAnalysisState) {
+        visibleState = state
+        pendingState = nil
+        pendingSince = 0
+    }
 }
 
 struct DNIAnalysis {

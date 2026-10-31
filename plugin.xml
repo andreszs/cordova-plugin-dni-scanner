@@ -2,15 +2,15 @@
 <plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
         xmlns:android="http://schemas.android.com/apk/res/android"
         id="cordova-plugin-dni-scanner"
-        version="0.2.5">
+        version="0.3.0">
     <name>DNI Scanner</name>
-    <description>Offline automatic DNI capture and perspective correction for Android and iOS.</description>
+    <description>Offline automatic DNI capture and pixel-preserving cropping for Android and iOS.</description>
     <license>MIT</license>
-    <keywords>cordova,android,ios,dni,document,camera,camerax,avfoundation</keywords>
+    <keywords>cordova,android,ios,dni,document,camera,camerax,opencv,avfoundation,vision</keywords>
 
     <engines>
         <engine name="cordova" version=">=11.0.0" />
-        <engine name="cordova-android" version=">=13.0.0 &lt;16.0.0" />
+        <engine name="cordova-android" version=">=15.0.0 &lt;16.0.0" />
         <engine name="cordova-ios" version=">=8.0.0 &lt;9.0.0" />
     </engines>
 
@@ -47,15 +47,13 @@
         <source-file src="src/android/java/DniScannerSuccessBeep.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/CaptureResolutionConfigurator.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/ScannerConfig.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/InstructionStateStabilizer.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/MotionStabilityTracker.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/DeviceMotionMonitor.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/ScanModels.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/LumaExtractor.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
-        <source-file src="src/android/java/DocumentDetector.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
-        <source-file src="src/android/java/QualityEvaluator.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
-        <source-file src="src/android/java/StabilityTracker.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
-        <source-file src="src/android/java/EdgeOcclusionTracker.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
-        <source-file src="src/android/java/GlareTracker.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/OpenCvDocumentEngine.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
+        <source-file src="src/android/java/TemporalDocumentTracker.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/FrameAnalyzer.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/ScannerOverlayView.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
         <source-file src="src/android/java/PerspectiveTransformer.java" target-dir="app/src/main/java/com/crediser/plugins/dniscanner" />
@@ -69,6 +67,7 @@
                 <param name="ios-package" value="DniScanner" />
                 <param name="onload" value="true" />
             </feature>
+            <preference name="deployment-target" value="15.5" />
         </config-file>
 
         <source-file src="src/ios/DniMotionStability.swift" />
@@ -76,7 +75,7 @@
         <source-file src="src/ios/DniScannerTypes.swift" />
         <source-file src="src/ios/DniScannerSuccessBeep.swift" />
         <source-file src="src/ios/DniScannerEngine.swift" />
-        <source-file src="src/ios/DniGeometricDocumentDetector.swift" />
+        <source-file src="src/ios/DniDocumentTracker.swift" />
         <source-file src="src/ios/DniScannerRecognizer.swift" />
         <source-file src="src/ios/DniScannerOverlayView.swift" />
         <source-file src="src/ios/DniScannerViewController.swift" />
@@ -86,6 +85,7 @@
         <framework src="AVFoundation.framework" />
         <framework src="CoreImage.framework" />
         <framework src="CoreMotion.framework" />
+        <framework src="ImageIO.framework" />
         <framework src="Vision.framework" />
         <framework src="WebKit.framework" />
     </platform>

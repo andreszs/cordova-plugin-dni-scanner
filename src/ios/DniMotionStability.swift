@@ -3,8 +3,8 @@ import Foundation
 struct DNIMotionParameters {
     static let `default` = DNIMotionParameters(
         smoothingFactor: 0.72,
-        maxGyroscopeRadPerSecond: 0.12,
-        maxGyroscopeSpikeRadPerSecond: 0.34,
+        maxGyroscopeRadPerSecond: 0.18,
+        maxGyroscopeSpikeRadPerSecond: 0.45,
         maxLinearAcceleration: 0.34,
         maxAccelerationSpike: 0.90,
         stableDuration: 0.300,
@@ -185,7 +185,6 @@ final class DNIMotionStabilityMachine {
 
     func captureMayProceed(at timestamp: TimeInterval) -> Bool {
         return captureActive
-            && !movementDetectedDuringCapture
             && snapshot(at: timestamp).stable
     }
 
@@ -195,7 +194,10 @@ final class DNIMotionStabilityMachine {
         captureActive = false
         movementDetectedDuringCapture = false
         return DNIMotionCaptureOutcome(
-            accepted: !movement,
+            // The shutter is gated while stable. After a photo exists, image
+            // sharpness is the authoritative quality check; a later CoreMotion
+            // spike must not discard an otherwise sharp capture.
+            accepted: true,
             movementDetected: movement,
             snapshot: current
         )

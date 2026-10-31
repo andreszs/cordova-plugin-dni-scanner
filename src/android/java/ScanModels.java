@@ -114,6 +114,138 @@ final class DocumentQuad {
         return distance(topRight, bottomRight);
     }
 
+    float rectangularityScore() {
+        float widthBalance = ratioScore(topWidth(), bottomWidth());
+        float heightBalance = ratioScore(leftHeight(), rightHeight());
+        float diagonalBalance = ratioScore(
+            distance(topLeft, bottomRight),
+            distance(topRight, bottomLeft)
+        );
+        float angleScore = 0f;
+        PointF[] corners = { topLeft, topRight, bottomRight, bottomLeft };
+        for (int index = 0; index < corners.length; index++) {
+            PointF previous = corners[(index + 3) % corners.length];
+            PointF current = corners[index];
+            PointF next = corners[(index + 1) % corners.length];
+            float ax = previous.x - current.x;
+            float ay = previous.y - current.y;
+            float bx = next.x - current.x;
+            float by = next.y - current.y;
+            float denominator = (float) Math.sqrt(
+                (ax * ax + ay * ay) * (bx * bx + by * by)
+            );
+            float cosine = denominator < 1e-4f
+                ? 1f
+                : Math.abs((ax * bx + ay * by) / denominator);
+            angleScore += Math.max(0f, 1f - cosine);
+        }
+        angleScore /= corners.length;
+        return clamp01(
+            0.30f * widthBalance
+                + 0.25f * heightBalance
+                + 0.20f * diagonalBalance
+                + 0.25f * angleScore
+        );
+    }
+
+    float maximumPerspectiveDeviationDegrees() {
+        float[] deviations = cornerAngleDeviationsDegrees();
+        if (deviations == null) {
+            return 90f;
+        }
+        float maximum = 0f;
+        for (float deviation : deviations) {
+            maximum = Math.max(maximum, Math.abs(deviation));
+        }
+        return maximum;
+    }
+
+    float maximumInPlaneRotationDegrees() {
+        return Math.max(
+            Math.abs(lineRotationDegrees(topLeft, topRight)),
+            Math.abs(lineRotationDegrees(bottomLeft, bottomRight))
+        );
+    }
+
+    boolean hasAcceptablePerspective(float freeLimit, float symmetricLimit,
+                                     float symmetryTolerance) {
+        float[] deviations = cornerAngleDeviationsDegrees();
+        if (deviations == null) {
+            return false;
+        }
+        float maximum = 0f;
+        for (float deviation : deviations) {
+            maximum = Math.max(maximum, Math.abs(deviation));
+        }
+        if (maximum <= freeLimit) {
+            return true;
+        }
+        if (maximum > symmetricLimit) {
+            return false;
+        }
+
+        // A clean projected rectangle has two adjacent, similarly opened
+        // corners and two adjacent, similarly closed corners. Evaluate both
+        // possible trapezoid axes so in-plane rotation remains irrelevant.
+        float horizontalAxisError = maximum(
+            Math.abs(deviations[0] - deviations[1]),
+            Math.abs(deviations[2] - deviations[3]),
+            Math.abs(deviations[0] + deviations[3]),
+            Math.abs(deviations[1] + deviations[2])
+        );
+        float verticalAxisError = maximum(
+            Math.abs(deviations[1] - deviations[2]),
+            Math.abs(deviations[3] - deviations[0]),
+            Math.abs(deviations[1] + deviations[0]),
+            Math.abs(deviations[2] + deviations[3])
+        );
+        return Math.min(horizontalAxisError, verticalAxisError) <= symmetryTolerance;
+    }
+
+    private float[] cornerAngleDeviationsDegrees() {
+        PointF[] corners = { topLeft, topRight, bottomRight, bottomLeft };
+        float[] deviations = new float[corners.length];
+        for (int index = 0; index < corners.length; index++) {
+            PointF previous = corners[(index + 3) % corners.length];
+            PointF current = corners[index];
+            PointF next = corners[(index + 1) % corners.length];
+            float ax = previous.x - current.x;
+            float ay = previous.y - current.y;
+            float bx = next.x - current.x;
+            float by = next.y - current.y;
+            float denominator = (float) Math.sqrt(
+                (ax * ax + ay * ay) * (bx * bx + by * by)
+            );
+            if (denominator < 1e-4f) {
+                return null;
+            }
+            float cosine = Math.max(-1f, Math.min(1f, (ax * bx + ay * by) / denominator));
+            float angle = (float) Math.toDegrees(Math.acos(cosine));
+            deviations[index] = angle - 90f;
+        }
+        return deviations;
+    }
+
+    private static float maximum(float first, float second, float third, float fourth) {
+        return Math.max(Math.max(first, second), Math.max(third, fourth));
+    }
+
+    private static float lineRotationDegrees(PointF start, PointF end) {
+        float angle = (float) Math.toDegrees(Math.atan2(end.y - start.y, end.x - start.x));
+        while (angle > 90f) angle -= 180f;
+        while (angle < -90f) angle += 180f;
+        return angle;
+    }
+
+    private static float ratioScore(float first, float second) {
+        float maximum = Math.max(first, second);
+        return maximum < 1e-4f ? 0f : Math.min(first, second) / maximum;
+    }
+
+    private static float clamp01(float value) {
+        return Math.max(0f, Math.min(1f, value));
+    }
+
     static float distance(PointF a, PointF b) {
         float dx = a.x - b.x;
         float dy = a.y - b.y;
@@ -201,10 +333,10 @@ final class DetectionRegion {
         float offsetY = (viewHeight - frameHeight * scale) * 0.5f;
         float margin = Math.min(guideRight - guideLeft, guideBottom - guideTop)
             * marginFraction;
-        float allowedLeft = guideLeft - margin;
-        float allowedTop = guideTop - margin;
-        float allowedRight = guideRight + margin;
-        float allowedBottom = guideBottom + margin;
+        float allowedLeft = Math.max(0f, guideLeft - margin);
+        float allowedTop = Math.max(0f, guideTop - margin);
+        float allowedRight = Math.min(viewWidth, guideRight + margin);
+        float allowedBottom = Math.min(viewHeight, guideBottom + margin);
         for (PointF point : quad.points()) {
             float viewX = offsetX + point.x * scale;
             float viewY = offsetY + point.y * scale;
@@ -230,6 +362,27 @@ final class DetectionRegion {
 
     float marginPixels() {
         return Math.min(guideRight - guideLeft, guideBottom - guideTop) * marginFraction;
+    }
+
+    float[] frameBounds(int frameWidth, int frameHeight) {
+        float scale = fillCenterScale(frameWidth, frameHeight);
+        float offsetX = (viewWidth - frameWidth * scale) * 0.5f;
+        float offsetY = (viewHeight - frameHeight * scale) * 0.5f;
+        float margin = Math.min(guideRight - guideLeft, guideBottom - guideTop)
+            * marginFraction;
+        // The pale-edge fallback must search the same outward-tolerant region
+        // accepted by contains(); otherwise the tolerance disappears precisely
+        // on white backgrounds where that fallback is needed most.
+        float allowedLeft = Math.max(0f, guideLeft - margin);
+        float allowedTop = Math.max(0f, guideTop - margin);
+        float allowedRight = Math.min(viewWidth, guideRight + margin);
+        float allowedBottom = Math.min(viewHeight, guideBottom + margin);
+        return new float[] {
+            Math.max(1f, (allowedLeft - offsetX) / scale),
+            Math.max(1f, (allowedTop - offsetY) / scale),
+            Math.min(frameWidth - 2f, (allowedRight - offsetX) / scale),
+            Math.min(frameHeight - 2f, (allowedBottom - offsetY) / scale)
+        };
     }
 
     private float fillCenterScale(int frameWidth, int frameHeight) {
@@ -405,7 +558,11 @@ final class AnalysisResult {
         HOLD_STILL,
         WAITING_FOR_FOCUS,
         READY,
-        CAPTURING
+        FOCUSING,
+        CAPTURING,
+        PROCESSING,
+        RETRYING,
+        SUCCESS
     }
 
     final State state;

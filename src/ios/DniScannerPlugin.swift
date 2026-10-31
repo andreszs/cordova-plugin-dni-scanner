@@ -15,6 +15,15 @@ final class DniScanner: CDVPlugin {
 
     @objc(scan:)
     func scan(_ command: CDVInvokedUrlCommand) {
+        guard #available(iOS 15.5, *) else {
+            sendError(
+                callbackId: command.callbackId,
+                code: "CAMERA_UNAVAILABLE",
+                message: "DNI Scanner requiere iOS 15.5 o posterior.",
+                recoverable: false
+            )
+            return
+        }
         guard pendingCallbackId == nil else {
             sendError(
                 callbackId: command.callbackId,
@@ -165,10 +174,11 @@ final class DniScanner: CDVPlugin {
             "motion": motion.dictionary,
             "appliedChecks": options.checks.dictionary,
             "recognitionSignals": signals,
-            "perspectiveCorrected": true,
+            "perspectiveCorrected": false,
             "flashMode": flashMode,
             "orientation": options.orientation == "auto" ? effectiveOrientation : options.orientation,
             "orientationMode": options.orientation,
+            "autoCapture": options.autoCapture,
             "debugMode": options.debugMode,
             "flashFired": flashFired ?? NSNull(),
             "capturedAt": formatter.string(from: Date())

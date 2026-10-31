@@ -3,6 +3,7 @@ package com.crediser.plugins.dniscanner;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
+import android.util.Log;
 
 import androidx.exifinterface.media.ExifInterface;
 
@@ -11,6 +12,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 
 final class StillImageProcessor {
+    private static final String TRACE_TAG = "DniScannerTrace";
+
     static final class RetryableProcessingException extends Exception {
         final AnalysisResult.State state;
         final DocumentDetection detection;
@@ -66,24 +69,51 @@ final class StillImageProcessor {
 
     private final ScannerConfig config;
     private final ScanChecks checks;
-    private final DocumentDetector detector;
-    private final QualityEvaluator qualityEvaluator;
+    private final OpenCvDocumentEngine engine;
     private final PerspectiveTransformer transformer;
     private final SideVariantRecognizer recognizer;
+    private final DocumentQuad previewQuad;
+    private final int previewWidth;
+    private final int previewHeight;
+    private final boolean debugMode;
 
     StillImageProcessor(ScannerConfig config, ScanChecks checks,
                         DetectionRegion detectionRegion) {
+        this(config, checks, detectionRegion, null, 0, 0, false);
+    }
+
+    StillImageProcessor(ScannerConfig config, ScanChecks checks,
+                        DetectionRegion detectionRegion, DocumentQuad previewQuad,
+                        int previewWidth, int previewHeight) {
+        this(
+            config, checks, detectionRegion, previewQuad,
+            previewWidth, previewHeight, false
+        );
+    }
+
+    StillImageProcessor(ScannerConfig config, ScanChecks checks,
+                        DetectionRegion detectionRegion, DocumentQuad previewQuad,
+                        int previewWidth, int previewHeight, boolean debugMode) {
         this.config = config;
         this.checks = checks;
-        detector = new DocumentDetector(config, detectionRegion);
-        qualityEvaluator = new QualityEvaluator(config);
+        // A still has its own crop/orientation. The normalized preview track is
+        // used as a ranking prior, not as a hard preview-guide boundary.
+        engine = new OpenCvDocumentEngine(config, null);
         transformer = new PerspectiveTransformer(config);
         recognizer = new SideVariantRecognizer(config);
+        this.previewQuad = previewQuad;
+        this.previewWidth = previewWidth;
+        this.previewHeight = previewHeight;
+        this.debugMode = debugMode;
     }
 
     Result process(File rawFile, File outputFile)
         throws IOException, RetryableProcessingException {
         int[] rawDimensions = orientedRawDimensions(rawFile);
+        trace("still:start raw=" + rawDimensions[0] + "x" + rawDimensions[1]
+            + " bytes=" + rawFile.length()
+            + " preview=" + previewWidth + "x" + previewHeight
+            + " previewQuad=" + quadText(previewQuad));
         Bitmap decoded = decodeForProcessing(rawFile);
         if (decoded == null) {
             throw new IOException("No se pudo decodificar la fotografía capturada.");
@@ -96,21 +126,61 @@ final class StillImageProcessor {
         Bitmap corrected = null;
         try {
             LumaFrame stillFrame = LumaExtractor.fromBitmap(oriented, config.stillDetectionMaxDimension);
-            DocumentDetection detection = detector.detect(stillFrame);
+            DocumentQuad prior = normalizedPreviewPrior(stillFrame.width, stillFrame.height);
+            trace("still:decoded=" + oriented.getWidth() + "x" + oriented.getHeight()
+                + " analysis=" + stillFrame.width + "x" + stillFrame.height
+                + " prior=" + quadText(prior));
+            DocumentDetection detection = engine.detect(stillFrame, prior);
+            if (detection == null && prior != null) {
+                trace("still:detection_with_prior_missed fallback=global_detection");
+                detection = engine.detect(stillFrame, null);
+            }
             if (detection == null) {
-                throw new RetryableProcessingException(
-                    "No se pudieron confirmar los cuatro bordes en la fotografía."
+                if (prior == null) {
+                    trace("still:reject reason=no_detection_or_preview_prior");
+                    throw new RetryableProcessingException(
+                        "No se pudieron confirmar los cuatro bordes en la fotografía."
+                    );
+                }
+                trace("still:guard fallback=preview_prior reason=no_still_detection");
+                detection = detectionForQuad(prior, 0.50f, stillFrame.width, stillFrame.height);
+            }
+            trace("still:detection score=" + decimal(detection.score)
+                + " area=" + decimal(detection.areaFraction)
+                + " aspect=" + decimal(detection.observedAspect)
+                + " quad=" + quadText(detection.quad));
+            TrackMatch trackMatch = prior == null ? null : comparePreviewTrack(
+                prior, detection.quad, stillFrame.width, stillFrame.height
+            );
+            if (trackMatch != null) {
+                trace("still:preview_match " + trackMatch);
+            }
+            if (trackMatch != null && trackMatch.isTight()) {
+                trace("still:guard correction=tight_still_detection");
+            } else if (trackMatch != null && trackMatch.isBounded()) {
+                DocumentQuad bounded = OpenCvDocumentEngine.blend(
+                    prior, detection.quad, 0.25f
+                );
+                trace("still:guard correction=bounded_blend weight=0.25 quad="
+                    + quadText(bounded));
+                detection = detectionForQuad(
+                    bounded, detection.score, stillFrame.width, stillFrame.height
+                );
+            } else if (trackMatch != null) {
+                trace("still:guard fallback=preview_prior reason=divergent_still_detection "
+                    + trackMatch);
+                detection = detectionForQuad(
+                    prior, Math.min(detection.score, 0.55f),
+                    stillFrame.width, stillFrame.height
                 );
             }
-            detection = detector.refineOutwardEdges(stillFrame, detection);
-            QualityMetrics preTransformQuality = qualityEvaluator.evaluate(
-                stillFrame,
-                detection.quad
-            );
+            QualityMetrics preTransformQuality = engine.assess(stillFrame, detection.quad);
+            trace("still:pre_quality " + qualityText(preTransformQuality));
             if (!transformer.hasSufficientSourceMargin(
                     detection.quad,
                     stillFrame.width,
                     stillFrame.height)) {
+                trace("still:reject reason=crop_incomplete");
                 throw new RetryableProcessingException(
                     "No se pudo conservar completo el contorno del DNI.",
                     AnalysisResult.State.CROP_INCOMPLETE,
@@ -120,22 +190,16 @@ final class StillImageProcessor {
                     stillFrame.height
                 );
             }
-            AnalysisResult.State qualityState = qualityEvaluator.classify(
-                detection,
-                preTransformQuality,
-                checks
+            AnalysisResult.State qualityState = engine.classify(
+                detection, preTransformQuality, checks
             );
-            if (qualityState == AnalysisResult.State.EDGE_OCCLUDED
-                && !qualityEvaluator.hasStillEdgeOcclusion(preTransformQuality)) {
-                qualityState = AnalysisResult.State.READY;
-            }
             if (qualityState == AnalysisResult.State.WAITING_FOR_FOCUS
                 || qualityState == AnalysisResult.State.IMPROVE_LIGHTING
                 || qualityState == AnalysisResult.State.REDUCE_LIGHTING
                 || qualityState == AnalysisResult.State.AVOID_GLARE
                 || qualityState == AnalysisResult.State.UNEVEN_LIGHTING
-                || qualityState == AnalysisResult.State.EDGE_OCCLUDED
                 || qualityState == AnalysisResult.State.ADJUST_PERSPECTIVE) {
+                trace("still:reject reason=pre_quality state=" + qualityState.name());
                 throw new RetryableProcessingException(
                     "La fotografía final no alcanzó la calidad mínima: " + qualityState.name(),
                     qualityState,
@@ -154,7 +218,12 @@ final class StillImageProcessor {
                 rawDimensions[1] / (float) stillFrame.height
             );
             int effectiveDocumentLongEdge = transformer.effectiveDocumentLongEdge(rawQuad);
+            trace("still:effective_long_edge=" + effectiveDocumentLongEdge
+                + " minimum=" + config.minEffectiveDocumentLongEdge);
             if (effectiveDocumentLongEdge < config.minEffectiveDocumentLongEdge) {
+                trace("still:reject reason=effective_resolution actual="
+                    + effectiveDocumentLongEdge + " minimum="
+                    + config.minEffectiveDocumentLongEdge);
                 throw new RetryableProcessingException(
                     "La fotografía no alcanzó la resolución efectiva mínima.",
                     AnalysisResult.State.MOVE_CLOSER,
@@ -164,7 +233,7 @@ final class StillImageProcessor {
                     stillFrame.height
                 );
             }
-            corrected = transformer.transform(oriented, sourceQuad);
+            corrected = transformer.cropWithoutWarp(oriented, sourceQuad);
             LumaFrame outputFrame = LumaExtractor.fromBitmap(corrected, config.stillDetectionMaxDimension);
             DocumentQuad outputQuad = new DocumentQuad(
                 new android.graphics.PointF(0f, 0f),
@@ -172,28 +241,25 @@ final class StillImageProcessor {
                 new android.graphics.PointF(outputFrame.width - 1f, outputFrame.height - 1f),
                 new android.graphics.PointF(0f, outputFrame.height - 1f)
             );
-            QualityMetrics outputQuality = qualityEvaluator.evaluate(outputFrame, outputQuad);
+            QualityMetrics outputQuality = engine.assess(outputFrame, outputQuad);
+            trace("still:output=" + corrected.getWidth() + "x" + corrected.getHeight()
+                + " " + qualityText(outputQuality));
             boolean outputTooDark = checks.brightness
-                && (outputQuality.brightness < config.minBrightness
-                    || outputQuality.darkFraction > config.maxDarkFraction);
+                && (outputQuality.brightness < 34f || outputQuality.darkFraction > 0.48f);
             boolean outputTooBright = checks.brightness
-                && (outputQuality.brightness > config.maxBrightness
-                    || outputQuality.clippedFraction > config.maxClippedFraction);
+                && outputQuality.clippedFraction > 0.48f
+                && outputQuality.glareBlobFraction > 0.12f;
             if ((checks.sharpness
                     && outputQuality.sharpness < config.minStillSharpnessVariance)
                 || outputTooDark
                 || outputTooBright
                 || (checks.glare
-                    && (outputQuality.glareFraction > config.maxGlareFraction
-                        || outputQuality.glareBlobFraction > config.maxGlareBlobFraction))
-                || (checks.shadows && qualityEvaluator.hasUnevenLighting(outputQuality))
-                || (checks.edgeOcclusion
-                    && qualityEvaluator.hasStillEdgeOcclusion(outputQuality))) {
+                    && outputQuality.glareBlobFraction > 0.14f)
+                || (checks.shadows && outputQuality.illuminationSpread > 0.52f
+                    && outputQuality.shadowBoundary > 0.30f)) {
                 AnalysisResult.State outputState;
-                if (checks.edgeOcclusion
-                    && qualityEvaluator.hasStillEdgeOcclusion(outputQuality)) {
-                    outputState = AnalysisResult.State.EDGE_OCCLUDED;
-                } else if (checks.shadows && qualityEvaluator.hasUnevenLighting(outputQuality)) {
+                if (checks.shadows && outputQuality.illuminationSpread > 0.52f
+                    && outputQuality.shadowBoundary > 0.30f) {
                     outputState = AnalysisResult.State.UNEVEN_LIGHTING;
                 } else if (checks.sharpness
                     && outputQuality.sharpness < config.minStillSharpnessVariance) {
@@ -205,8 +271,9 @@ final class StillImageProcessor {
                 } else {
                     outputState = AnalysisResult.State.AVOID_GLARE;
                 }
+                trace("still:reject reason=output_quality state=" + outputState.name());
                 throw new RetryableProcessingException(
-                    "La imagen corregida no alcanzó la calidad mínima.",
+                    "La imagen recortada no alcanzó la calidad mínima.",
                     outputState,
                     new DocumentDetection(
                         outputQuad,
@@ -224,6 +291,9 @@ final class StillImageProcessor {
             RecognitionResult recognition = config.profile == ScanProfile.DNI
                 ? recognizer.recognize(corrected)
                 : RecognitionResult.unknown();
+            trace("still:accepted side=" + recognition.side
+                + " variant=" + recognition.variant
+                + " content=" + decimal(recognition.contentScore));
 
             File parent = outputFile.getParentFile();
             if (parent != null && !parent.exists() && !parent.mkdirs()) {
@@ -231,7 +301,7 @@ final class StillImageProcessor {
             }
             try (FileOutputStream stream = new FileOutputStream(outputFile)) {
                 if (!corrected.compress(Bitmap.CompressFormat.JPEG, config.jpegQuality, stream)) {
-                    throw new IOException("No se pudo codificar el JPEG corregido.");
+                    throw new IOException("No se pudo codificar el JPEG recortado.");
                 }
             }
             return new Result(
@@ -250,6 +320,131 @@ final class StillImageProcessor {
             if (corrected != null && !corrected.isRecycled()) {
                 corrected.recycle();
             }
+        }
+    }
+
+    private DocumentQuad normalizedPreviewPrior(int width, int height) {
+        if (previewQuad == null || previewWidth <= 0 || previewHeight <= 0) {
+            return null;
+        }
+        return previewQuad.scaled(
+            width / (float) previewWidth,
+            height / (float) previewHeight
+        );
+    }
+
+    private TrackMatch comparePreviewTrack(DocumentQuad prior, DocumentQuad detected,
+                                           int width, int height) {
+        float priorArea = prior.area();
+        float areaRatio = detected.area() / Math.max(1f, priorArea);
+        float priorHeight = (prior.leftHeight() + prior.rightHeight()) * 0.5f;
+        float detectedHeight = (detected.leftHeight() + detected.rightHeight()) * 0.5f;
+        float priorAspect = (prior.topWidth() + prior.bottomWidth()) * 0.5f
+            / Math.max(1f, priorHeight);
+        float detectedAspect = (detected.topWidth() + detected.bottomWidth()) * 0.5f
+            / Math.max(1f, detectedHeight);
+        float aspectChange = Math.abs(detectedAspect - priorAspect)
+            / Math.max(0.01f, priorAspect);
+        float rmsDistance = OpenCvDocumentEngine.quadDistance(
+            prior, detected, width, height
+        );
+        float maximumCornerDistance = OpenCvDocumentEngine.quadMaxCornerDistance(
+            prior, detected, width, height
+        );
+        boolean accepted = rmsDistance <= 0.030f
+            && maximumCornerDistance <= 0.045f
+            && areaRatio >= 0.84f
+            && areaRatio <= 1.18f
+            && aspectChange <= 0.16f;
+        return new TrackMatch(
+            accepted, rmsDistance, maximumCornerDistance, areaRatio, aspectChange
+        );
+    }
+
+    private DocumentDetection detectionForQuad(DocumentQuad quad, float score,
+                                               int width, int height) {
+        float area = quad.area() / Math.max(1f, width * (float) height);
+        android.graphics.PointF center = quad.center();
+        float centerOffset = (float) Math.hypot(
+            (center.x - width * 0.5f) / Math.max(1f, width * 0.5f),
+            (center.y - height * 0.5f) / Math.max(1f, height * 0.5f)
+        );
+        float averageHeight = (quad.leftHeight() + quad.rightHeight()) * 0.5f;
+        float aspect = (quad.topWidth() + quad.bottomWidth()) * 0.5f
+            / Math.max(1f, averageHeight);
+        return new DocumentDetection(quad, score, area, centerOffset, aspect);
+    }
+
+    private void trace(String message) {
+        if (debugMode) {
+            Log.i(TRACE_TAG, message);
+        }
+    }
+
+    private String qualityText(QualityMetrics quality) {
+        return "focus=" + decimal(quality.sharpness)
+            + " light=" + decimal(quality.brightness)
+            + " dark=" + decimal(quality.darkFraction)
+            + " clipped=" + decimal(quality.clippedFraction)
+            + " glare=" + decimal(quality.glareBlobFraction)
+            + " perspective=" + decimal(quality.perspectiveScore)
+            + " spread=" + decimal(quality.illuminationSpread)
+            + " shadow=" + decimal(quality.shadowBoundary);
+    }
+
+    private static String quadText(DocumentQuad quad) {
+        if (quad == null) {
+            return "-";
+        }
+        return String.format(
+            java.util.Locale.US,
+            "[(%.1f,%.1f),(%.1f,%.1f),(%.1f,%.1f),(%.1f,%.1f)]",
+            quad.topLeft.x, quad.topLeft.y,
+            quad.topRight.x, quad.topRight.y,
+            quad.bottomRight.x, quad.bottomRight.y,
+            quad.bottomLeft.x, quad.bottomLeft.y
+        );
+    }
+
+    private static String decimal(double value) {
+        return String.format(java.util.Locale.US, "%.4f", value);
+    }
+
+    private static final class TrackMatch {
+        final boolean accepted;
+        final float rmsDistance;
+        final float maximumCornerDistance;
+        final float areaRatio;
+        final float aspectChange;
+
+        TrackMatch(boolean accepted, float rmsDistance, float maximumCornerDistance,
+                   float areaRatio, float aspectChange) {
+            this.accepted = accepted;
+            this.rmsDistance = rmsDistance;
+            this.maximumCornerDistance = maximumCornerDistance;
+            this.areaRatio = areaRatio;
+            this.aspectChange = aspectChange;
+        }
+
+        boolean isTight() {
+            return rmsDistance <= 0.012f
+                && maximumCornerDistance <= 0.020f
+                && areaRatio >= 0.92f
+                && areaRatio <= 1.08f
+                && aspectChange <= 0.08f;
+        }
+
+        boolean isBounded() {
+            return accepted;
+        }
+
+        @Override
+        public String toString() {
+            return "accepted=" + accepted
+                + " rms=" + decimal(rmsDistance)
+                + " maxCorner=" + decimal(maximumCornerDistance)
+                + " areaRatio=" + decimal(areaRatio)
+                + " aspectChange=" + decimal(aspectChange);
         }
     }
 

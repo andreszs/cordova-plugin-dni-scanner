@@ -78,8 +78,9 @@ public final class DniScannerPlugin extends CordovaPlugin {
         if (profile == ScanProfile.GENERIC_CARD && !"off".equals(sideValidation)) {
             return "Para profile='genericCard', sideValidation debe ser 'off'.";
         }
-        if (options.has("autoCapture") && !options.optBoolean("autoCapture", true)) {
-            return "La versión actual sólo admite autoCapture=true.";
+        if (options.has("autoCapture")
+            && !(options.opt("autoCapture") instanceof Boolean)) {
+            return "autoCapture debe ser booleano.";
         }
         String flashMode = options.optString("flashMode", "off");
         if (!("off".equals(flashMode) || "auto".equals(flashMode) || "on".equals(flashMode))) {

@@ -39,6 +39,19 @@ public final class Bitmap {
         return new Bitmap(new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB));
     }
 
+    public static Bitmap createBitmap(Bitmap source, int x, int y, int width, int height) {
+        BufferedImage cropped = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = cropped.createGraphics();
+        graphics.drawImage(
+            source.image,
+            0, 0, width, height,
+            x, y, x + width, y + height,
+            null
+        );
+        graphics.dispose();
+        return new Bitmap(cropped);
+    }
+
     public int getWidth() {
         return image.getWidth();
     }

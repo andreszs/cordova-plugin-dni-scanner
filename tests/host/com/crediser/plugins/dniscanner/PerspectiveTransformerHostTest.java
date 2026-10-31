@@ -7,7 +7,7 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 
-/** Exercises the projective warp with a skewed synthetic color card. */
+/** Exercises the pixel-preserving crop with a skewed synthetic color card. */
 public final class PerspectiveTransformerHostTest {
     private PerspectiveTransformerHostTest() {
     }
@@ -25,8 +25,11 @@ public final class PerspectiveTransformerHostTest {
         if (ScannerConfig.DEFAULT.minStillSharpnessVariance != 115.0) {
             throw new AssertionError("The legacy Android still sharpness default must be preserved");
         }
-        if (ScannerConfig.DEFAULT.cropPaddingPercent != ScannerConfig.CROP_PADDING_PERCENT) {
-            throw new AssertionError("The default crop safety padding must be 3 percent");
+        if (Math.abs(
+                ScannerConfig.DEFAULT.cropPaddingFraction
+                    - ScannerConfig.CROP_PADDING_PERCENT / 100f
+            ) > 0.0001f) {
+            throw new AssertionError("The default crop safety padding must be 6 percent");
         }
 
         int width = 1100;
@@ -60,13 +63,12 @@ public final class PerspectiveTransformerHostTest {
         if (!transformer.hasSufficientSourceMargin(quad, width, height)) {
             throw new AssertionError("A well-contained document must pass crop-integrity validation");
         }
-        Bitmap corrected = transformer.transform(new Bitmap(source), quad);
+        Bitmap corrected = transformer.cropWithoutWarp(new Bitmap(source), quad);
         float aspect = corrected.getWidth() / (float) corrected.getHeight();
-        System.out.printf("TRANSFORMED width=%d height=%d aspect=%.4f%n",
+        System.out.printf("CROPPED width=%d height=%d aspect=%.4f%n",
             corrected.getWidth(), corrected.getHeight(), aspect);
-        if (corrected.getWidth() > ScannerConfig.DEFAULT.maxOutputLongEdge
-            || Math.abs(aspect - ScannerConfig.DEFAULT.expectedDocumentAspect) > 0.01f) {
-            throw new AssertionError("Unexpected perspective-corrected dimensions");
+        if (corrected.getWidth() > ScannerConfig.DEFAULT.maxOutputLongEdge) {
+            throw new AssertionError("Unexpected cropped dimensions");
         }
         int center = corrected.getPixel(corrected.getWidth() / 2, corrected.getHeight() / 2);
         if (((center >> 16) & 0xff) < 100) {
@@ -75,6 +77,20 @@ public final class PerspectiveTransformerHostTest {
         int paddedCorner = corrected.getPixel(2, 2);
         if (((paddedCorner >> 16) & 0xff) > 80) {
             throw new AssertionError("The corrected image did not preserve outward safety padding");
+        }
+        int firstCardPixelAtQuarter = firstLightPixelFromTop(
+            corrected,
+            corrected.getWidth() / 4
+        );
+        int firstCardPixelAtThreeQuarters = firstLightPixelFromTop(
+            corrected,
+            corrected.getWidth() * 3 / 4
+        );
+        if (firstCardPixelAtQuarter < 0 || firstCardPixelAtThreeQuarters < 0
+            || Math.abs(firstCardPixelAtQuarter - firstCardPixelAtThreeQuarters) < 10) {
+            throw new AssertionError(
+                "A pixel-preserving crop must not straighten the real document edge"
+            );
         }
 
         DocumentQuad axisAligned = new DocumentQuad(
@@ -99,27 +115,45 @@ public final class PerspectiveTransformerHostTest {
         }
 
         DocumentQuad clippedTop = new DocumentQuad(
-            new PointF(100f, 8f),
-            new PointF(900f, 8f),
-            new PointF(900f, 508f),
-            new PointF(100f, 508f)
+            new PointF(100f, 3f),
+            new PointF(900f, 3f),
+            new PointF(900f, 503f),
+            new PointF(100f, 503f)
         );
         if (transformer.hasSufficientSourceMargin(clippedTop, 1000, 700)) {
             throw new AssertionError("A document too close to the source boundary must be retried");
         }
         try {
-            transformer.transform(new Bitmap(source), clippedTop);
-            throw new AssertionError("Transform must not silently clamp incomplete crop padding");
+            transformer.cropWithoutWarp(new Bitmap(source), clippedTop);
+            throw new AssertionError("Crop must not silently clamp incomplete padding");
         } catch (IllegalArgumentException expected) {
             // Expected: the scanner must retry instead of returning a clipped DNI.
         }
 
+        DocumentQuad completeNearBoundary = new DocumentQuad(
+            new PointF(8f, 80f),
+            new PointF(992f, 80f),
+            new PointF(992f, 580f),
+            new PointF(8f, 580f)
+        );
+        if (transformer.hasSufficientSourceMargin(completeNearBoundary, 1000, 700)) {
+            throw new AssertionError(
+                "A document without the full safety margin must be retried"
+            );
+        }
+        try {
+            transformer.cropWithoutWarp(new Bitmap(source), completeNearBoundary);
+            throw new AssertionError("Crop must require the full safety margin");
+        } catch (IllegalArgumentException expected) {
+            // Expected: preserving all four borders is mandatory.
+        }
+
         ScannerConfig compactConfig = ScannerConfig.withMaxOutputLongEdge(768);
         Bitmap compact = new PerspectiveTransformer(compactConfig)
-            .transform(new Bitmap(source), quad);
+            .cropWithoutWarp(new Bitmap(source), quad);
         float compactAspect = compact.getWidth() / (float) compact.getHeight();
         if (compact.getWidth() != 768
-            || Math.abs(compactAspect - compactConfig.expectedDocumentAspect) > 0.01f) {
+            || Math.abs(compactAspect - aspect) > 0.01f) {
             throw new AssertionError("The configured output maximum was not applied");
         }
 
@@ -134,7 +168,7 @@ public final class PerspectiveTransformerHostTest {
             405,
             BufferedImage.TYPE_INT_ARGB
         );
-        Bitmap lowResolution = transformer.transform(
+        Bitmap lowResolution = transformer.cropWithoutWarp(
             new Bitmap(lowResolutionSource),
             lowResolutionQuad
         );
@@ -161,6 +195,18 @@ public final class PerspectiveTransformerHostTest {
         assertInvalidMaximum(2049);
         assertInvalidPreferredCapture(1279);
         assertInvalidPreferredCapture(2049);
+    }
+
+    private static int firstLightPixelFromTop(Bitmap bitmap, int x) {
+        for (int y = 0; y < bitmap.getHeight(); y++) {
+            int pixel = bitmap.getPixel(x, y);
+            if (((pixel >> 16) & 0xff) > 150
+                && ((pixel >> 8) & 0xff) > 150
+                && (pixel & 0xff) > 150) {
+                return y;
+            }
+        }
+        return -1;
     }
 
     private static void assertInvalidMaximum(int value) {
