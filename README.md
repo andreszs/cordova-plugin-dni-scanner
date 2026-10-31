@@ -163,7 +163,7 @@ obstructions.
 | `side` | `"front" \| "back" \| "any"` | required | Use `front`/`back` with `dni`; use `any` with `genericCard`. |
 | `sideValidation` | `"off" \| "advisory" \| "strict"` | `"off"` | Controls side recognition. `off` neither exposes nor enforces the heuristic side result, `advisory` returns the best-effort classification without blocking, and `strict` requires it to match `side`. |
 | `autoCapture` | `boolean` | `true` | Enables automatic capture after a stable, focused track. Set it to `false` to use the native **Capturar** button only; the button also remains available as a fallback when automatic capture is enabled. |
-| `orientation` | `"portrait" \| "landscape" \| "auto"` | `"portrait"` | Scanner orientation for this session. `auto` follows the phone while scanning; capture briefly locks the current orientation. Fixed landscape follows both physical landscape positions on iOS. |
+| `orientation` | `"portrait" \| "landscape" \| "auto"` | `"portrait"` | Scanner orientation for this session. `auto` follows all four display rotations while scanning; capture briefly locks the current orientation. Fixed portrait and landscape modes follow both physical positions on Android and iOS. |
 | `flashMode` | `"off" \| "auto" \| "on"` | `"off"` | Initial flash mode. `on` uses the torch; `off` is recommended to reduce reflections. |
 | `showCloseButton` | `boolean` | `true` | Shows the native close button. Android Back still cancels when hidden. |
 | `showFlashButton` | `boolean` | `true` | Shows the flash selector when the device has a flash unit. |
@@ -408,7 +408,7 @@ The unused CameraX video stack is excluded. The plugin contains no downloadable 
 - Glare, shadow, and hand/edge detection are heuristic and may require further device calibration.
 - Camera and recognition thresholds may require additional calibration across representative devices and DNI samples.
 - QR and PDF417 are not decoded, and no Base64 result is produced.
-- Fixed portrait or landscape mode keeps that orientation family for the scan; `auto` follows the device between portrait and landscape. EXIF camera orientation is normalized, but document roll, perspective, and upside-down placement are never corrected after capture.
+- Fixed portrait or landscape mode keeps that orientation family for the scan and follows both physical positions; `auto` follows all four display rotations. EXIF camera orientation is normalized, but document roll, perspective, and upside-down placement are never corrected after capture.
 - Output is temporary cache data and has no plugin-managed retention policy.
 
 ## Tests

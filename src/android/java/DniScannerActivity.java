@@ -1,11 +1,13 @@
 package com.crediser.plugins.dniscanner;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.res.Configuration;
 import android.content.pm.ActivityInfo;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.PointF;
+import android.hardware.display.DisplayManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -106,6 +108,10 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     private boolean completed;
     private boolean rebindingForRotation;
     private int cameraBindGeneration;
+    private int boundDisplayRotation = -1;
+    private int pendingDisplayRotation = -1;
+    private DisplayManager displayManager;
+    private boolean displayListenerRegistered;
     private Runnable timeoutRunnable;
     private AnalysisResult latestAnalysis;
     private int latestFrameWidth;
@@ -124,6 +130,28 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     private long lastWarmFocusMs;
     private AnalysisResult.State lastTraceState;
     private long lastTraceAnalysisMs;
+    private final DisplayManager.DisplayListener displayRotationListener =
+        new DisplayManager.DisplayListener() {
+            @Override
+            public void onDisplayAdded(int displayId) {
+                // The scanner always uses the display already hosting its PreviewView.
+            }
+
+            @Override
+            public void onDisplayRemoved(int displayId) {
+                // Activity teardown handles removal of the active display.
+            }
+
+            @Override
+            public void onDisplayChanged(int displayId) {
+                if (previewView == null
+                    || previewView.getDisplay() == null
+                    || previewView.getDisplay().getDisplayId() != displayId) {
+                    return;
+                }
+                synchronizeCameraRotation("display", false);
+            }
+        };
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -197,6 +225,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         }
 
         createUserInterface();
+        displayManager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
         scheduleTimeout();
         previewView.post(this::startCamera);
     }
@@ -210,16 +239,18 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     @Override
     public void onConfigurationChanged(@NonNull Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        if (!"auto".equals(scanOrientation) || completed || capturing) {
+        if (completed || capturing) {
             return;
         }
-        rebindCameraAfterRotation();
+        previewView.post(() -> synchronizeCameraRotation("configuration", true));
     }
 
     @Override
     protected void onStart() {
         super.onStart();
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START);
+        registerDisplayRotationListener();
+        previewView.post(() -> synchronizeCameraRotation("start", false));
     }
 
     @Override
@@ -242,6 +273,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
 
     @Override
     protected void onStop() {
+        unregisterDisplayRotationListener();
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP);
         super.onStop();
     }
@@ -250,6 +282,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     protected void onDestroy() {
         completed = true;
         cameraBindGeneration++;
+        unregisterDisplayRotationListener();
         if (timeoutRunnable != null) {
             mainHandler.removeCallbacks(timeoutRunnable);
         }
@@ -390,14 +423,17 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
 
     private void scheduleCameraBindAfterLayout() {
         int generation = ++cameraBindGeneration;
-        waitForStablePreviewLayout(generation, 0, 0, 0, 0);
+        pendingDisplayRotation = currentDisplayRotation();
+        waitForStablePreviewLayout(generation, 0, 0, -1, 0, 0, 0);
     }
 
     private void waitForStablePreviewLayout(
         int generation,
         int previousWidth,
         int previousHeight,
+        int previousRotation,
         int stablePasses,
+        int stableRotationPasses,
         int attempts
     ) {
         if (generation != cameraBindGeneration
@@ -410,8 +446,16 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
 
         int width = previewView.getWidth();
         int height = previewView.getHeight();
+        int displayRotation = currentDisplayRotation();
         boolean sameSize = width == previousWidth && height == previousHeight;
+        boolean sameRotation = displayRotation == previousRotation;
         int nextStablePasses = sameSize ? stablePasses + 1 : 0;
+        int nextStableRotationPasses = sameRotation ? stableRotationPasses + 1 : 0;
+        if (displayRotation != pendingDisplayRotation) {
+            trace("rotation:layout_update pending=" + rotationText(pendingDisplayRotation)
+                + " display=" + rotationText(displayRotation));
+            pendingDisplayRotation = displayRotation;
+        }
         boolean landscape = getResources().getConfiguration().orientation
             == Configuration.ORIENTATION_LANDSCAPE;
         boolean orientationReady = landscape ? width >= height : height >= width;
@@ -421,14 +465,15 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             && height > 0
             && orientationReady
             && viewPortReady
-            && nextStablePasses >= 1) {
-            bindCameraUseCases();
+            && nextStablePasses >= 1
+            && nextStableRotationPasses >= 1) {
+            bindCameraUseCases(generation, displayRotation);
             return;
         }
 
         if (attempts >= 30) {
             if (width > 0 && height > 0 && viewPortReady) {
-                bindCameraUseCases();
+                bindCameraUseCases(generation, displayRotation);
             } else {
                 finishWithError("CAMERA_UNAVAILABLE", "No se pudo preparar la vista de cámara.", true);
             }
@@ -439,12 +484,19 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             generation,
             width,
             height,
+            displayRotation,
             nextStablePasses,
+            nextStableRotationPasses,
             attempts + 1
         ));
     }
 
-    private void bindCameraUseCases() {
+    private void bindCameraUseCases(int generation, int targetRotation) {
+        if (generation != cameraBindGeneration
+            || targetRotation != currentDisplayRotation()) {
+            scheduleCameraBindAfterLayout();
+            return;
+        }
         if (frameAnalyzer != null) {
             frameAnalyzer.setEnabled(false);
         }
@@ -452,7 +504,6 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             imageAnalysis.clearAnalyzer();
         }
         cameraProvider.unbindAll();
-        int targetRotation = currentDisplayRotation();
         Preview preview = new Preview.Builder()
             .setTargetRotation(targetRotation)
             .build();
@@ -498,6 +549,11 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
                 CameraSelector.DEFAULT_BACK_CAMERA,
                 groupBuilder.build()
             );
+            boundDisplayRotation = targetRotation;
+            pendingDisplayRotation = targetRotation;
+            trace("rotation:bound display=" + rotationText(targetRotation)
+                + " size=" + previewView.getWidth() + "x" + previewView.getHeight()
+                + " mode=" + scanOrientation);
             boolean hasFlash = camera.getCameraInfo().hasFlashUnit();
             if (flashButton != null) {
                 flashButton.setVisibility(hasFlash ? View.VISIBLE : View.GONE);
@@ -566,8 +622,35 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         rebindingForRotation = false;
     }
 
-    private void rebindCameraAfterRotation() {
+    private void synchronizeCameraRotation(String reason, boolean forceRebind) {
+        if (completed || isFinishing() || capturing || previewView == null) {
+            return;
+        }
+        int displayRotation = currentDisplayRotation();
+        trace("rotation:event reason=" + reason
+            + " display=" + rotationText(displayRotation)
+            + " bound=" + rotationText(boundDisplayRotation)
+            + " pending=" + rotationText(pendingDisplayRotation)
+            + " config=" + currentOrientation()
+            + " size=" + previewView.getWidth() + "x" + previewView.getHeight());
+        if (cameraProvider == null) {
+            return;
+        }
+        if (rebindingForRotation && displayRotation == pendingDisplayRotation) {
+            return;
+        }
+        if (!forceRebind && displayRotation == boundDisplayRotation) {
+            return;
+        }
+        rebindCameraAfterRotation(reason, displayRotation);
+    }
+
+    private void rebindCameraAfterRotation(String reason, int displayRotation) {
+        trace("rotation:rebind reason=" + reason
+            + " display=" + rotationText(displayRotation)
+            + " previous=" + rotationText(boundDisplayRotation));
         rebindingForRotation = true;
+        pendingDisplayRotation = displayRotation;
         latestAnalysis = null;
         latestFrameWidth = 0;
         latestFrameHeight = 0;
@@ -586,10 +669,41 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         scheduleCameraBindAfterLayout();
     }
 
+    private void registerDisplayRotationListener() {
+        if (displayManager == null || displayListenerRegistered) {
+            return;
+        }
+        displayManager.registerDisplayListener(displayRotationListener, mainHandler);
+        displayListenerRegistered = true;
+    }
+
+    private void unregisterDisplayRotationListener() {
+        if (displayManager == null || !displayListenerRegistered) {
+            return;
+        }
+        displayManager.unregisterDisplayListener(displayRotationListener);
+        displayListenerRegistered = false;
+    }
+
     private int currentDisplayRotation() {
         return previewView.getDisplay() == null
             ? Surface.ROTATION_0
             : previewView.getDisplay().getRotation();
+    }
+
+    private static String rotationText(int rotation) {
+        switch (rotation) {
+            case Surface.ROTATION_0:
+                return "0";
+            case Surface.ROTATION_90:
+                return "90";
+            case Surface.ROTATION_180:
+                return "180";
+            case Surface.ROTATION_270:
+                return "270";
+            default:
+                return "-";
+        }
     }
 
     private String currentOrientation() {
@@ -1000,6 +1114,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             focusMeteringPending = false;
             focusMeteringSequence++;
             unlockAutoOrientationAfterRetry();
+            previewView.post(() -> synchronizeCameraRotation("capture_retry", false));
             AnalysisResult retryResult = diagnostic != null
                 ? copyAnalysisWithState(diagnostic, AnalysisResult.State.RETRYING)
                 : latestAnalysis == null

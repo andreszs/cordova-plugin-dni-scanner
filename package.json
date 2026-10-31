@@ -1,6 +1,6 @@
 {
   "name": "cordova-plugin-dni-scanner",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Offline automatic capture and pixel-preserving cropping for Argentine DNI cards on Android and iOS.",
   "license": "MIT",
   "author": "Andres Zs",
@@ -52,6 +52,6 @@
     "provenance": true
   },
   "scripts": {
-    "test": "node tests/success-beep.test.js && node tests/capture-resolution.test.js && node tests/still-quality-options.test.js && node tests/detection-pipeline.test.js && node tests/debug-mode.test.js && node tests/status-feedback.test.js"
+    "test": "node tests/success-beep.test.js && node tests/capture-resolution.test.js && node tests/still-quality-options.test.js && node tests/detection-pipeline.test.js && node tests/debug-mode.test.js && node tests/status-feedback.test.js && node tests/display-rotation.test.js"
   }
 }

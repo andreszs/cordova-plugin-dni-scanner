@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 - 2026-10-31
+
+- Fixed intermittent upside-down Android camera previews after rotation by observing actual display-rotation changes, including 180-degree transitions between both landscape or portrait positions.
+- Waits for both the `PreviewView` layout and `Display.rotation` to stabilize before rebinding Preview, ImageAnalysis, and ImageCapture, preventing stale CameraX target rotations.
+- Re-synchronizes camera orientation after a rejected capture and adds `debugMode` rotation-event, rebind, and bound-state traces.
+
 ## 0.3.0 - 2026-10-31
 
 - Replaced the Android Sobel/Hough detector with an OpenCV 4.12 multi-strategy contour engine, four-side evidence scoring, pyramidal optical-flow tracking, temporal smoothing, and fresh-geometry shutter validation.
