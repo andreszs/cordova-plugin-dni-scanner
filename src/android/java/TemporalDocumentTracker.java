@@ -19,7 +19,7 @@ import java.util.List;
  */
 final class TemporalDocumentTracker implements AutoCloseable {
     private static final int DETECTION_PERIOD = 3;
-    private static final int MAX_FLOW_ONLY_FRAMES = 3;
+    private static final int MAX_FLOW_ONLY_FRAMES = 5;
     private static final float MAX_RECONCILE_DISTANCE = 0.055f;
     private static final float MAX_RECONCILE_CORNER_DISTANCE = 0.075f;
     private static final float MIN_TRACK_AREA_RATIO = 0.86f;
@@ -43,6 +43,9 @@ final class TemporalDocumentTracker implements AutoCloseable {
     private int flowOnlyFrames;
     private int observations;
     private long stableSinceMs;
+    private boolean geometryAccepted;
+    private long adjustPerspectiveSinceMs;
+    private boolean forceGlobalDetection;
 
     TemporalDocumentTracker(ScannerConfig config, ScanChecks checks,
                             DetectionRegion detectionRegion) {
@@ -56,17 +59,27 @@ final class TemporalDocumentTracker implements AutoCloseable {
         Mat current = engine.gray(frame);
         try {
             DocumentQuad flow = trackWithOpticalFlow(current, frame.width, frame.height);
-            boolean runDetection = smoothed == null || frameIndex++ % DETECTION_PERIOD == 0
+            boolean globalRecovery = forceGlobalDetection;
+            forceGlobalDetection = false;
+            boolean runDetection = globalRecovery || smoothed == null
+                || frameIndex++ % DETECTION_PERIOD == 0
                 || flow == null || flowOnlyFrames >= MAX_FLOW_ONLY_FRAMES;
             DocumentDetection detected = runDetection
                 ? engine.detect(current, frame.width, frame.height,
-                    flow != null ? flow : smoothed)
+                    globalRecovery ? null : (flow != null ? flow : smoothed))
                 : null;
 
-            DocumentDetection candidate = reconcile(
-                detected, flow, frame.width, frame.height
-            );
+            DocumentDetection candidate = globalRecovery
+                ? detected : reconcile(detected, flow, frame.width, frame.height);
             if (candidate == null) {
+                clearTrack(false);
+                remember(current);
+                return new AnalysisResult(
+                    AnalysisResult.State.SEARCHING, null, null,
+                    false, false, nowMs
+                );
+            }
+            if (!DocumentShapeGate.accepts(candidate.quad, frame.width, frame.height)) {
                 clearTrack(false);
                 remember(current);
                 return new AnalysisResult(
@@ -89,25 +102,59 @@ final class TemporalDocumentTracker implements AutoCloseable {
             boolean cropComplete = cropGeometry.hasSufficientSourceMargin(
                 candidate.quad, frame.width, frame.height
             );
-            AnalysisResult.State state = engine.classify(candidate, quality, checks);
+            AnalysisResult.State state = engine.classify(
+                candidate, quality, checks, geometryAccepted
+            );
             if (state == AnalysisResult.State.READY && !cropComplete) {
                 state = AnalysisResult.State.CROP_INCOMPLETE;
             }
 
-            boolean geometryValid = (!checks.documentSize
-                || (candidate.areaFraction >= 0.14f && candidate.areaFraction <= 0.88f))
-                && (!checks.centering || candidate.centerOffset <= 0.34f)
-                && candidate.quad.maximumInPlaneRotationDegrees()
-                    <= ScannerConfig.MAX_IN_PLANE_ROTATION_DEGREES
-                && candidate.quad.hasAcceptablePerspective(
-                    ScannerConfig.MAX_RECTANGLE_DEVIATION_DEGREES,
-                    ScannerConfig.MAX_SYMMETRIC_PERSPECTIVE_DEVIATION_DEGREES,
-                    ScannerConfig.MAX_TRAPEZOID_SYMMETRY_ERROR_DEGREES
-                )
+            boolean trackingGeometryValid = (!checks.documentSize
+                || (candidate.areaFraction >= ScannerConfig.MINIMUM_DOCUMENT_AREA
+                    && candidate.areaFraction <= ScannerConfig.MAXIMUM_DOCUMENT_AREA))
+                && (!checks.centering
+                    || candidate.centerOffset <= ScannerConfig.MAXIMUM_CENTER_OFFSET)
+                && (!checks.perspective || (
+                    candidate.quad.maximumInPlaneRotationDegrees()
+                        <= (geometryAccepted
+                            ? ScannerConfig.EXIT_IN_PLANE_ROTATION_DEGREES
+                            : ScannerConfig.MAX_IN_PLANE_ROTATION_DEGREES)
+                    && candidate.quad.hasAcceptablePerspective(
+                        geometryAccepted
+                            ? ScannerConfig.EXIT_RECTANGLE_DEVIATION_DEGREES
+                            : ScannerConfig.MAX_RECTANGLE_DEVIATION_DEGREES,
+                        geometryAccepted
+                            ? ScannerConfig.EXIT_SYMMETRIC_PERSPECTIVE_DEVIATION_DEGREES
+                            : ScannerConfig.MAX_SYMMETRIC_PERSPECTIVE_DEVIATION_DEGREES,
+                        geometryAccepted
+                            ? ScannerConfig.EXIT_TRAPEZOID_SYMMETRY_ERROR_DEGREES
+                            : ScannerConfig.MAX_TRAPEZOID_SYMMETRY_ERROR_DEGREES
+                    )))
                 && cropComplete;
+            geometryAccepted = trackingGeometryValid;
+            boolean geometryValid = (!checks.documentSize
+                || (candidate.areaFraction >= ScannerConfig.MINIMUM_DOCUMENT_AREA
+                    && candidate.areaFraction <= ScannerConfig.MAXIMUM_DOCUMENT_AREA))
+                && (!checks.centering
+                    || candidate.centerOffset <= ScannerConfig.MAXIMUM_CENTER_OFFSET)
+                && (!checks.perspective || (
+                    candidate.quad.maximumInPlaneRotationDegrees()
+                        <= ScannerConfig.MAX_IN_PLANE_ROTATION_DEGREES
+                    && candidate.quad.hasAcceptablePerspective(
+                        ScannerConfig.MAX_RECTANGLE_DEVIATION_DEGREES,
+                        ScannerConfig.MAX_SYMMETRIC_PERSPECTIVE_DEVIATION_DEGREES,
+                        ScannerConfig.MAX_TRAPEZOID_SYMMETRY_ERROR_DEGREES
+                    )))
+                && cropComplete;
+            // Exit thresholds keep an already acquired track calm, but must never
+            // authorize the shutter. The current frame has to meet entry geometry.
+            if (state == AnalysisResult.State.READY && !geometryValid) {
+                state = AnalysisResult.State.ADJUST_PERSPECTIVE;
+            }
             boolean qualityValid = state == AnalysisResult.State.READY;
             long stableDuration = stableSinceMs == 0L ? 0L : nowMs - stableSinceMs;
-            int requiredObservations = checks.stability ? 4 : 2;
+            int requiredObservations = checks.stability
+                ? config.stableFrames : config.geometryConfirmationFrames;
             long requiredDuration = checks.stability
                 ? config.stableDurationMs : config.geometryConfirmationDurationMs;
             if (state == AnalysisResult.State.READY
@@ -115,6 +162,16 @@ final class TemporalDocumentTracker implements AutoCloseable {
                     || stableDuration < requiredDuration)) {
                 state = AnalysisResult.State.HOLD_STILL;
                 qualityValid = true;
+            }
+            if (state == AnalysisResult.State.ADJUST_PERSPECTIVE) {
+                if (adjustPerspectiveSinceMs == 0L) {
+                    adjustPerspectiveSinceMs = nowMs;
+                } else if (nowMs - adjustPerspectiveSinceMs >= 650L) {
+                    forceGlobalDetection = true;
+                    adjustPerspectiveSinceMs = nowMs;
+                }
+            } else {
+                adjustPerspectiveSinceMs = 0L;
             }
 
             AnalysisResult result = new AnalysisResult(
@@ -307,6 +364,9 @@ final class TemporalDocumentTracker implements AutoCloseable {
         lastDetection = null;
         flowOnlyFrames = 0;
         frameIndex = 0;
+        geometryAccepted = false;
+        adjustPerspectiveSinceMs = 0L;
+        forceGlobalDetection = false;
         resetStability();
         if (releaseFrame && previousGray != null) {
             previousGray.release();

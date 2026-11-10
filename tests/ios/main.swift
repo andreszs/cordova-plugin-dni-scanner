@@ -108,16 +108,16 @@ private let tests: [(String, () throws -> Void)] = [
         try expect(stabilizer.update(candidate: .edgeOccluded, at: 1.66) == .edgeOccluded,
             "a persistent state must eventually become visible")
     }),
-    ("instruction tracking loss has a 300 ms grace", {
+    ("instruction tracking loss has a 500 ms grace", {
         let stabilizer = DNIInstructionStateStabilizer(
-            confirmationDuration: 0.5,
-            lossGraceDuration: 0.3
+            confirmationDuration: 0.65,
+            lossGraceDuration: 0.5
         )
         stabilizer.force(.holdStill)
         try expect(stabilizer.update(candidate: .searching, at: 2.00) == .holdStill,
             "tracking loss must not regress immediately")
-        try expect(stabilizer.update(candidate: .searching, at: 2.31) == .searching,
-            "tracking loss should become visible after 300 ms")
+        try expect(stabilizer.update(candidate: .searching, at: 2.51) == .searching,
+            "tracking loss should become visible after 500 ms")
     }),
     ("registered sensor becomes stale", {
         let machine = stableMachine()
@@ -167,6 +167,39 @@ private let tests: [(String, () throws -> Void)] = [
             "autoCapture": false
         ])
         try expect(!options.autoCapture, "autoCapture=false must enable manual-only mode")
+    }),
+    ("OCR-friendly checks and perspective opt-out are preserved", {
+        let defaults = try DNIOptions(dictionary: ["side": "front"])
+        try expect(!defaults.checks.centering, "centering should be advisory by default")
+        try expect(!defaults.checks.stability, "sensor stability should be advisory by default")
+        try expect(!defaults.checks.glare, "moderate glare should warn by default")
+        let relaxed = try DNIOptions(dictionary: [
+            "side": "front",
+            "checks": ["perspective": false]
+        ])
+        try expect(!relaxed.checks.perspective, "perspective=false must not be forced on")
+    }),
+    ("document shape gate rejects audited glare corners", {
+        let accepted = DNIQuad(
+            topLeft: CGPoint(x: 63, y: 250),
+            topRight: CGPoint(x: 272, y: 248),
+            bottomRight: CGPoint(x: 276, y: 375),
+            bottomLeft: CGPoint(x: 66, y: 378)
+        )
+        try expect(
+            DNIDocumentShapeGate.accepts(accepted, width: 324, height: 640),
+            "the successful Xiaomi still must remain valid"
+        )
+        let deformed = DNIQuad(
+            topLeft: CGPoint(x: 57, y: 205),
+            topRight: CGPoint(x: 198, y: 200),
+            bottomRight: CGPoint(x: 244, y: 345),
+            bottomLeft: CGPoint(x: 61, y: 290)
+        )
+        try expect(
+            !DNIDocumentShapeGate.accepts(deformed, width: 259, height: 512),
+            "a glare-generated bottom-right corner must be rejected"
+        )
     }),
     ("preferred capture long edge is validated", {
         let options = try DNIOptions(dictionary: [

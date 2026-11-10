@@ -15,10 +15,19 @@ public final class PerspectiveGateHostTest {
             throw new AssertionError("Large in-plane rotation was not measured");
         }
 
-        DocumentQuad alignedRectangle = rotatedRectangle(500f, 350f, 800f, 500f, 1.5f);
+        DocumentQuad alignedRectangle = rotatedRectangle(500f, 350f, 800f, 500f, 3.8f);
         if (alignedRectangle.maximumInPlaneRotationDegrees()
             > ScannerConfig.MAX_IN_PLANE_ROTATION_DEGREES) {
             throw new AssertionError("A rectangle within the roll tolerance was rejected");
+        }
+        DocumentQuad hysteresisRectangle = rotatedRectangle(500f, 350f, 800f, 500f, 4.8f);
+        if (hysteresisRectangle.maximumInPlaneRotationDegrees()
+            <= ScannerConfig.MAX_IN_PLANE_ROTATION_DEGREES) {
+            throw new AssertionError("Exit hysteresis must not satisfy capture geometry");
+        }
+        if (hysteresisRectangle.maximumInPlaneRotationDegrees()
+            > ScannerConfig.EXIT_IN_PLANE_ROTATION_DEGREES) {
+            throw new AssertionError("A previously accepted track lost exit hysteresis");
         }
 
         DocumentQuad cleanTrapezoid = new DocumentQuad(
@@ -30,15 +39,15 @@ public final class PerspectiveGateHostTest {
         }
 
         DocumentQuad skewedParallelogram = new DocumentQuad(
-            new PointF(120f, 100f), new PointF(920f, 100f),
-            new PointF(900f, 600f), new PointF(100f, 600f)
+            new PointF(100f, 100f), new PointF(900f, 100f),
+            new PointF(800f, 600f), new PointF(100f, 600f)
         );
         if (acceptable(skewedParallelogram)) {
             throw new AssertionError("An asymmetrically skewed quadrilateral was accepted");
         }
 
         DocumentQuad excessiveTrapezoid = new DocumentQuad(
-            new PointF(180f, 100f), new PointF(820f, 100f),
+            new PointF(220f, 100f), new PointF(780f, 100f),
             new PointF(900f, 600f), new PointF(100f, 600f)
         );
         if (acceptable(excessiveTrapezoid)) {

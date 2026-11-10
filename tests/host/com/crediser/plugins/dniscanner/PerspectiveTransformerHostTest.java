@@ -22,8 +22,8 @@ public final class PerspectiveTransformerHostTest {
         if (ScannerConfig.DEFAULT.minEffectiveDocumentLongEdge != 0) {
             throw new AssertionError("Effective document resolution must be opt-in by default");
         }
-        if (ScannerConfig.DEFAULT.minStillSharpnessVariance != 115.0) {
-            throw new AssertionError("The legacy Android still sharpness default must be preserved");
+        if (ScannerConfig.DEFAULT.minStillSharpnessVariance != 90.0) {
+            throw new AssertionError("The OCR-friendly Android sharpness default must be 90");
         }
         if (Math.abs(
                 ScannerConfig.DEFAULT.cropPaddingFraction
@@ -131,21 +131,33 @@ public final class PerspectiveTransformerHostTest {
         }
 
         DocumentQuad completeNearBoundary = new DocumentQuad(
-            new PointF(8f, 80f),
-            new PointF(992f, 80f),
-            new PointF(992f, 580f),
-            new PointF(8f, 580f)
+            new PointF(25f, 80f),
+            new PointF(975f, 80f),
+            new PointF(975f, 580f),
+            new PointF(25f, 580f)
         );
-        if (transformer.hasSufficientSourceMargin(completeNearBoundary, 1000, 700)) {
+        if (!transformer.hasSufficientSourceMargin(completeNearBoundary, 1000, 700)) {
             throw new AssertionError(
-                "A document without the full safety margin must be retried"
+                "A complete document with the minimum physical margin was rejected"
             );
         }
-        try {
-            transformer.cropWithoutWarp(new Bitmap(source), completeNearBoundary);
-            throw new AssertionError("Crop must require the full safety margin");
-        } catch (IllegalArgumentException expected) {
-            // Expected: preserving all four borders is mandatory.
+        if (!transformer.usesReducedPadding(completeNearBoundary, 1000, 700)) {
+            throw new AssertionError("Reduced desired padding must be reported");
+        }
+
+        DocumentQuad borderQuad = new DocumentQuad(
+            new PointF(30f, 25f),
+            new PointF(170f, 25f),
+            new PointF(170f, 115f),
+            new PointF(30f, 115f)
+        );
+        LumaFrame completeBorder = syntheticCardFrame(false);
+        if (!transformer.hasCompletePhysicalBorder(completeBorder, borderQuad)) {
+            throw new AssertionError("Four real exterior borders must be accepted");
+        }
+        LumaFrame missingTopBorder = syntheticCardFrame(true);
+        if (transformer.hasCompletePhysicalBorder(missingTopBorder, borderQuad)) {
+            throw new AssertionError("An internal line must not substitute the top border");
         }
 
         ScannerConfig compactConfig = ScannerConfig.withMaxOutputLongEdge(768);
@@ -207,6 +219,20 @@ public final class PerspectiveTransformerHostTest {
             }
         }
         return -1;
+    }
+
+    private static LumaFrame syntheticCardFrame(boolean cardContinuesAboveQuad) {
+        int width = 200;
+        int height = 140;
+        byte[] luma = new byte[width * height];
+        java.util.Arrays.fill(luma, (byte) 30);
+        int top = cardContinuesAboveQuad ? 0 : 25;
+        for (int y = top; y <= 115; y++) {
+            for (int x = 30; x <= 170; x++) {
+                luma[y * width + x] = (byte) 200;
+            }
+        }
+        return new LumaFrame(width, height, luma);
     }
 
     private static void assertInvalidMaximum(int value) {

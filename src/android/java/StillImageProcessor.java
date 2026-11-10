@@ -51,10 +51,12 @@ final class StillImageProcessor {
         final DocumentDetection detection;
         final QualityMetrics quality;
         final RecognitionResult recognition;
+        final boolean reducedPadding;
 
         Result(File file, int rawWidth, int rawHeight, int effectiveDocumentLongEdge,
                int width, int height, DocumentDetection detection,
-               QualityMetrics quality, RecognitionResult recognition) {
+               QualityMetrics quality, RecognitionResult recognition,
+               boolean reducedPadding) {
             this.file = file;
             this.rawWidth = rawWidth;
             this.rawHeight = rawHeight;
@@ -64,6 +66,7 @@ final class StillImageProcessor {
             this.detection = detection;
             this.quality = quality;
             this.recognition = recognition;
+            this.reducedPadding = reducedPadding;
         }
     }
 
@@ -136,14 +139,10 @@ final class StillImageProcessor {
                 detection = engine.detect(stillFrame, null);
             }
             if (detection == null) {
-                if (prior == null) {
-                    trace("still:reject reason=no_detection_or_preview_prior");
-                    throw new RetryableProcessingException(
-                        "No se pudieron confirmar los cuatro bordes en la fotografía."
-                    );
-                }
-                trace("still:guard fallback=preview_prior reason=no_still_detection");
-                detection = detectionForQuad(prior, 0.50f, stillFrame.width, stillFrame.height);
+                trace("still:reject reason=no_still_detection");
+                throw new RetryableProcessingException(
+                    "No se pudieron confirmar los cuatro bordes en la fotografía."
+                );
             }
             trace("still:detection score=" + decimal(detection.score)
                 + " area=" + decimal(detection.areaFraction)
@@ -167,15 +166,30 @@ final class StillImageProcessor {
                     bounded, detection.score, stillFrame.width, stillFrame.height
                 );
             } else if (trackMatch != null) {
-                trace("still:guard fallback=preview_prior reason=divergent_still_detection "
+                trace("still:reject reason=divergent_still_detection "
                     + trackMatch);
-                detection = detectionForQuad(
-                    prior, Math.min(detection.score, 0.55f),
-                    stillFrame.width, stillFrame.height
+                throw new RetryableProcessingException(
+                    "La fotografía no confirmó los cuatro bordes del DNI.",
+                    AnalysisResult.State.CROP_INCOMPLETE,
+                    detection,
+                    null,
+                    stillFrame.width,
+                    stillFrame.height
                 );
             }
             QualityMetrics preTransformQuality = engine.assess(stillFrame, detection.quad);
             trace("still:pre_quality " + qualityText(preTransformQuality));
+            if (!transformer.hasCompletePhysicalBorder(stillFrame, detection.quad)) {
+                trace("still:reject reason=physical_border_unconfirmed");
+                throw new RetryableProcessingException(
+                    "No se pudieron confirmar los cuatro bordes físicos del DNI.",
+                    AnalysisResult.State.CROP_INCOMPLETE,
+                    detection,
+                    preTransformQuality,
+                    stillFrame.width,
+                    stillFrame.height
+                );
+            }
             if (!transformer.hasSufficientSourceMargin(
                     detection.quad,
                     stillFrame.width,
@@ -233,7 +247,10 @@ final class StillImageProcessor {
                     stillFrame.height
                 );
             }
-            corrected = transformer.cropWithoutWarp(oriented, sourceQuad);
+            PerspectiveTransformer.CropResult crop = transformer.cropWithoutWarpAdaptive(
+                oriented, sourceQuad
+            );
+            corrected = crop.bitmap;
             LumaFrame outputFrame = LumaExtractor.fromBitmap(corrected, config.stillDetectionMaxDimension);
             DocumentQuad outputQuad = new DocumentQuad(
                 new android.graphics.PointF(0f, 0f),
@@ -313,7 +330,8 @@ final class StillImageProcessor {
                 corrected.getHeight(),
                 detection,
                 outputQuality,
-                recognition
+                recognition,
+                crop.reducedPadding
             );
         } finally {
             oriented.recycle();

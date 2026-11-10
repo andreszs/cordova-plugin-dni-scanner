@@ -12,14 +12,26 @@ final class ScannerConfig {
     static final int DEFAULT_MIN_EFFECTIVE_DOCUMENT_LONG_EDGE = 0;
     static final int MAX_EFFECTIVE_DOCUMENT_LONG_EDGE = 4096;
     static final double MIN_STILL_SHARPNESS_VARIANCE = 1.0;
-    static final double DEFAULT_MIN_STILL_SHARPNESS_VARIANCE = 115.0;
+    static final double DEFAULT_MIN_STILL_SHARPNESS_VARIANCE = 90.0;
     static final double MAX_STILL_SHARPNESS_VARIANCE = 10000.0;
-    static final float GUIDE_MARGIN_PERCENT = 6f;
+    static final float GUIDE_MARGIN_PERCENT = 10f;
     static final float CROP_PADDING_PERCENT = 6f;
-    static final float MAX_RECTANGLE_DEVIATION_DEGREES = 1.5f;
-    static final float MAX_SYMMETRIC_PERSPECTIVE_DEVIATION_DEGREES = 8f;
-    static final float MAX_TRAPEZOID_SYMMETRY_ERROR_DEGREES = 2.5f;
-    static final float MAX_IN_PLANE_ROTATION_DEGREES = 2f;
+    static final float MINIMUM_CROP_PADDING_PERCENT = 1.75f;
+    static final float MINIMUM_DOCUMENT_AREA = 0.10f;
+    static final float MAXIMUM_DOCUMENT_AREA = 0.92f;
+    static final float MINIMUM_STILL_DOCUMENT_ASPECT = 1.35f;
+    static final float MAXIMUM_STILL_DOCUMENT_ASPECT = 1.95f;
+    static final float MINIMUM_PHYSICAL_BORDER_SEPARATION = 5f;
+    static final float MINIMUM_SEPARATED_BORDER_FRACTION = 0.32f;
+    static final float MAXIMUM_CENTER_OFFSET = 0.43f;
+    static final float MAX_RECTANGLE_DEVIATION_DEGREES = 3f;
+    static final float MAX_SYMMETRIC_PERSPECTIVE_DEVIATION_DEGREES = 12f;
+    static final float MAX_TRAPEZOID_SYMMETRY_ERROR_DEGREES = 5f;
+    static final float MAX_IN_PLANE_ROTATION_DEGREES = 4f;
+    static final float EXIT_RECTANGLE_DEVIATION_DEGREES = 4f;
+    static final float EXIT_SYMMETRIC_PERSPECTIVE_DEVIATION_DEGREES = 15f;
+    static final float EXIT_TRAPEZOID_SYMMETRY_ERROR_DEGREES = 7f;
+    static final float EXIT_IN_PLANE_ROTATION_DEGREES = 5.5f;
 
     static final ScannerConfig DEFAULT = new ScannerConfig(
         DEFAULT_PREFERRED_CAPTURE_LONG_EDGE,
@@ -41,13 +53,13 @@ final class ScannerConfig {
     final float expectedDocumentAspect = 85.60f / 53.98f;
     final float guideMarginFraction = GUIDE_MARGIN_PERCENT / 100f;
     final float cropPaddingFraction = CROP_PADDING_PERCENT / 100f;
-    final float minimumCropIntegrityClearanceFraction = 0.006f;
+    final float minimumCropIntegrityClearanceFraction = MINIMUM_CROP_PADDING_PERCENT / 100f;
     final float cropIntegrityGuardPixels = 1f;
 
-    final int stableFrames = 4;
-    final long stableDurationMs = 500L;
+    final int stableFrames = 2;
+    final long stableDurationMs = 220L;
     final int geometryConfirmationFrames = 2;
-    final long geometryConfirmationDurationMs = 240L;
+    final long geometryConfirmationDurationMs = 200L;
 
     final float motionSmoothingFactor = 0.72f;
     final float maxGyroscopeRadPerSecond = 0.18f;
@@ -59,13 +71,13 @@ final class ScannerConfig {
     final long motionSensorStartupTimeoutMs = 1000L;
     final long motionSensorStaleTimeoutMs = 750L;
 
-    final long instructionStateConfirmationMs = 500L;
-    final long instructionLossGraceMs = 300L;
-    final long captureDelayMs = 180L;
-    final long focusMeteringTimeoutMs = 700L;
+    final long instructionStateConfirmationMs = 650L;
+    final long instructionLossGraceMs = 500L;
+    final long captureDelayMs = 65L;
+    final long focusMeteringTimeoutMs = 425L;
     final long retryMessageDurationMs = 1000L;
 
-    final double minSharpnessVariance = 55.0;
+    final double minSharpnessVariance = 38.0;
     final int jpegQuality = 95;
     final int recognitionWidth = 256;
     final int recognitionHeight = 160;

@@ -37,9 +37,11 @@ assert(androidActivity.includes('json.put("effectiveDocumentLongEdge"'));
 assert(!androidTransformer.includes('Math.max(640, targetWidth)'));
 assert(androidConfig.includes('CROP_PADDING_PERCENT = 6f'));
 assert(androidTransformer.includes('config.cropPaddingFraction'));
-assert(androidTransformer.includes('Bitmap.createBitmap(source, left, top, width, height)'));
+assert(androidTransformer.includes('Bitmap.createBitmap(source, plan.left, plan.top, width, height)'));
 assert(!androidTransformer.includes('setPolyToPoly'));
-assert(androidTransformer.includes('float requiredFraction = Math.max('));
+assert(androidTransformer.includes('minimumCropIntegrityClearanceFraction'));
+assert(androidTransformer.includes('leftPadding = Math.min(desiredXPadding, availableLeft)'));
+assert(androidTransformer.includes('final boolean reducedPadding'));
 assert(!androidTransformer.includes('maximumSafePaddingFraction'));
 
 assert(iosTypes.includes('defaultPreferredCaptureLongEdge = 1600'));
@@ -48,6 +50,8 @@ assert(iosController.includes('supportedMaxPhotoDimensions'));
 assert(iosController.includes('settings.maxPhotoDimensions = dimensions'));
 assert(iosEngine.includes('max(options.preferredCaptureLongEdge, options.maxOutputLongEdge)'));
 assert(iosEngine.includes('CGFloat(maxLongEdge) / max(ciRect.width, ciRect.height)'));
+assert(iosEngine.includes('minimumAdaptivePaddingFraction: CGFloat = 0.0175'));
+assert(iosEngine.includes('usesReducedPadding('));
 assert(iosPlugin.includes('"rawWidth": scan.rawWidth'));
 assert(iosPlugin.includes('"effectiveDocumentLongEdge"'));
 

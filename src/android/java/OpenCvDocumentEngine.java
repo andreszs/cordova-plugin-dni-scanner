@@ -35,8 +35,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class OpenCvDocumentEngine {
     private static final AtomicBoolean INITIALIZED = new AtomicBoolean(false);
     private static final float MIN_CANDIDATE_AREA = 0.10f;
-    private static final float MAX_CANDIDATE_AREA = 0.94f;
-    private static final float MIN_EDGE_SUPPORT = 0.48f;
+    private static final float MAX_CANDIDATE_AREA = 0.92f;
+    private static final float MIN_EDGE_SUPPORT = 0.41f;
+    private static final float MIN_SIDE_EDGE_SUPPORT = 0.22f;
     private static final float MAX_PRIOR_DISTANCE = 0.14f;
 
     private final ScannerConfig config;
@@ -114,7 +115,7 @@ final class OpenCvDocumentEngine {
         float second = candidates.size() > 1 ? candidates.get(1).score : 0f;
         float ambiguityMargin = Math.max(0f, best.score - second);
         float confidence = clamp01(best.score * (0.82f + 0.18f * Math.min(1f, ambiguityMargin / 0.20f)));
-        if (confidence < 0.48f) {
+        if (confidence < 0.40f) {
             return null;
         }
         return new DocumentDetection(
@@ -295,15 +296,21 @@ final class OpenCvDocumentEngine {
             return null;
         }
         float observedAspect = averageWidth / averageHeight;
-        if (observedAspect < 1.08f || observedAspect > 2.75f) {
+        if (!DocumentShapeGate.accepts(quad, width, height)) {
             return null;
         }
-        float edgeSupport = edgeSupport(quad, edges, width, height);
+        float[] sideSupports = edgeSupports(quad, edges, width, height);
+        float edgeSupport = average(sideSupports);
         if (edgeSupport < MIN_EDGE_SUPPORT) {
             return null;
         }
+        for (float sideSupport : sideSupports) {
+            if (sideSupport < MIN_SIDE_EDGE_SUPPORT) {
+                return null;
+            }
+        }
         float solidity = clamp01((float) (contourArea / Math.max(1.0, quad.area())));
-        if (solidity < 0.62f) {
+        if (solidity < 0.55f) {
             return null;
         }
         PointF center = quad.center();
@@ -354,10 +361,14 @@ final class OpenCvDocumentEngine {
     }
 
     float edgeSupport(DocumentQuad quad, Mat edges, int width, int height) {
+        return average(edgeSupports(quad, edges, width, height));
+    }
+
+    private float[] edgeSupports(DocumentQuad quad, Mat edges, int width, int height) {
         PointF[] points = {
             quad.topLeft, quad.topRight, quad.bottomRight, quad.bottomLeft
         };
-        float total = 0f;
+        float[] supports = new float[4];
         for (int side = 0; side < 4; side++) {
             PointF first = points[side];
             PointF second = points[(side + 1) % 4];
@@ -383,9 +394,17 @@ final class OpenCvDocumentEngine {
                     supported++;
                 }
             }
-            total += supported / (float) samples;
+            supports[side] = supported / (float) samples;
         }
-        return total * 0.25f;
+        return supports;
+    }
+
+    private static float average(float[] values) {
+        float total = 0f;
+        for (float value : values) {
+            total += value;
+        }
+        return values.length == 0 ? 0f : total / values.length;
     }
 
     QualityMetrics assess(LumaFrame frame, DocumentQuad quad) {
@@ -547,27 +566,43 @@ final class OpenCvDocumentEngine {
 
     AnalysisResult.State classify(DocumentDetection detection, QualityMetrics quality,
                                   ScanChecks checks) {
-        if (checks.documentSize && detection.areaFraction < 0.14f) {
+        return classify(detection, quality, checks, false);
+    }
+
+    AnalysisResult.State classify(DocumentDetection detection, QualityMetrics quality,
+                                  ScanChecks checks, boolean useExitGeometryLimits) {
+        if (checks.documentSize
+            && detection.areaFraction < ScannerConfig.MINIMUM_DOCUMENT_AREA) {
             return AnalysisResult.State.MOVE_CLOSER;
         }
-        if (checks.documentSize && detection.areaFraction > 0.88f) {
+        if (checks.documentSize
+            && detection.areaFraction > ScannerConfig.MAXIMUM_DOCUMENT_AREA) {
             return AnalysisResult.State.MOVE_AWAY;
         }
-        if (checks.centering && detection.centerOffset > 0.34f) {
+        if (checks.centering
+            && detection.centerOffset > ScannerConfig.MAXIMUM_CENTER_OFFSET) {
             return AnalysisResult.State.CENTER_DOCUMENT;
         }
-        if (detection.quad.maximumInPlaneRotationDegrees()
-            > ScannerConfig.MAX_IN_PLANE_ROTATION_DEGREES) {
-            return AnalysisResult.State.ADJUST_PERSPECTIVE;
+        if (checks.perspective) {
+            float rotationLimit = useExitGeometryLimits
+                ? ScannerConfig.EXIT_IN_PLANE_ROTATION_DEGREES
+                : ScannerConfig.MAX_IN_PLANE_ROTATION_DEGREES;
+            float freeLimit = useExitGeometryLimits
+                ? ScannerConfig.EXIT_RECTANGLE_DEVIATION_DEGREES
+                : ScannerConfig.MAX_RECTANGLE_DEVIATION_DEGREES;
+            float perspectiveLimit = useExitGeometryLimits
+                ? ScannerConfig.EXIT_SYMMETRIC_PERSPECTIVE_DEVIATION_DEGREES
+                : ScannerConfig.MAX_SYMMETRIC_PERSPECTIVE_DEVIATION_DEGREES;
+            float symmetryLimit = useExitGeometryLimits
+                ? ScannerConfig.EXIT_TRAPEZOID_SYMMETRY_ERROR_DEGREES
+                : ScannerConfig.MAX_TRAPEZOID_SYMMETRY_ERROR_DEGREES;
+            if (detection.quad.maximumInPlaneRotationDegrees() > rotationLimit
+                || !detection.quad.hasAcceptablePerspective(
+                    freeLimit, perspectiveLimit, symmetryLimit)) {
+                return AnalysisResult.State.ADJUST_PERSPECTIVE;
+            }
         }
-        if (!detection.quad.hasAcceptablePerspective(
-            ScannerConfig.MAX_RECTANGLE_DEVIATION_DEGREES,
-            ScannerConfig.MAX_SYMMETRIC_PERSPECTIVE_DEVIATION_DEGREES,
-            ScannerConfig.MAX_TRAPEZOID_SYMMETRY_ERROR_DEGREES
-        )) {
-            return AnalysisResult.State.ADJUST_PERSPECTIVE;
-        }
-        if (checks.sharpness && quality.sharpness < 55.0) {
+        if (checks.sharpness && quality.sharpness < config.minSharpnessVariance) {
             return AnalysisResult.State.WAITING_FOR_FOCUS;
         }
         if (checks.brightness && (quality.brightness < 36f || quality.darkFraction > 0.45f)) {

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+## 0.3.2 - 2026-11-10
+
+- Recalibrated Android and iOS for an OCR-friendly default policy: 4° capture roll, moderate 12° perspective, 0.10–0.92 area, relaxed centering, and tracking/UI hysteresis that cannot authorize the shutter.
+- Decoupled the smaller dotted guide from the safe detection viewport, retained tracks for up to five missed frames, and stabilized visible instructions for 650 ms.
+- Reduced visual confirmation to two frames and roughly 200–220 ms, shortened pre-capture delay to 65 ms and AF/AE fallback to 425 ms, and made inertial sensors diagnostic rather than capture gates.
+- Made `checks.perspective: false` effective and ensured manual capture is never vetoed by motion sensors.
+- Added adaptive per-side crop padding: 6% remains the target, 1.75% remains mandatory to prove every physical edge is complete, and reduced output padding is reported as `reduced_padding`.
+- Lowered Android edge support/solidity thresholds and iOS Vision candidate scoring while retaining aspect, convexity, temporal tracking, and still-photo re-detection.
+- Still-photo validation now rejects preview/still geometry disagreements, requires evidence on every side, and confirms exterior pixels beyond all four physical borders before cropping.
+- Added one shared document-shape admission gate before scoring and tracking on Android and iOS, plus periodic global reacquisition when perspective remains invalid, preventing glare-generated corners from becoming stable tracks.
+
 ## 0.3.1 - 2026-10-31
 
 - Fixed intermittent upside-down Android camera previews after rotation by observing actual display-rotation changes, including 180-degree transitions between both landscape or portrait positions.

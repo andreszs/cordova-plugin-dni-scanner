@@ -47,8 +47,81 @@ struct DNIRaster {
 
 final class DNIImageFactory {
     static let shared = DNIImageFactory()
+    private static let minimumAdaptivePaddingFraction: CGFloat = 0.0175
+    private static let minimumStillDocumentAspect: CGFloat = 1.35
+    private static let maximumStillDocumentAspect: CGFloat = 1.95
+
+    private struct CropPlan {
+        let rect: CGRect
+        let reducedPadding: Bool
+    }
     private let context = CIContext(options: [.cacheIntermediates: false])
     private let colorSpace = CGColorSpaceCreateDeviceRGB()
+
+    func hasCompletePhysicalBorder(from source: DNIRaster, quad: DNIQuad) -> Bool {
+        let averageHeight = (quad.leftHeight + quad.rightHeight) * 0.5
+        let aspect = (quad.topWidth + quad.bottomWidth) * 0.5 / max(1, averageHeight)
+        guard aspect >= Self.minimumStillDocumentAspect,
+              aspect <= Self.maximumStillDocumentAspect else { return false }
+        let offset = max(3, min(7, averageHeight * 0.018))
+        let points = [quad.topLeft, quad.topRight, quad.bottomRight, quad.bottomLeft]
+        return points.indices.allSatisfy {
+            sideSeparatesFromExterior(
+                source,
+                first: points[$0],
+                second: points[($0 + 1) % points.count],
+                offset: offset
+            )
+        }
+    }
+
+    private func sideSeparatesFromExterior(
+        _ source: DNIRaster,
+        first: CGPoint,
+        second: CGPoint,
+        offset: CGFloat
+    ) -> Bool {
+        let dx = second.x - first.x
+        let dy = second.y - first.y
+        let length = hypot(dx, dy)
+        guard length >= 2 else { return false }
+        let outward = CGPoint(x: dy / length, y: -dx / length)
+        var compared = 0
+        var separated = 0
+        var total = 0.0
+        for sample in 0..<32 {
+            let t = 0.08 + 0.84 * (CGFloat(sample) + 0.5) / 32
+            let point = CGPoint(x: first.x + dx * t, y: first.y + dy * t)
+            let inside = CGPoint(x: point.x - outward.x * offset,
+                                 y: point.y - outward.y * offset)
+            let outside = CGPoint(x: point.x + outward.x * offset,
+                                  y: point.y + outward.y * offset)
+            guard contains(source, inside), contains(source, outside) else { continue }
+            let insideXY = (Int(inside.x.rounded()), Int(inside.y.rounded()))
+            let outsideXY = (Int(outside.x.rounded()), Int(outside.y.rounded()))
+            let lumaDifference = abs(
+                source.lumaAt(x: insideXY.0, y: insideXY.1)
+                    - source.lumaAt(x: outsideXY.0, y: outsideXY.1)
+            )
+            let insideRGB = source.rgbAt(x: insideXY.0, y: insideXY.1)
+            let outsideRGB = source.rgbAt(x: outsideXY.0, y: outsideXY.1)
+            let colorDifference = (abs(insideRGB.0 - outsideRGB.0)
+                + abs(insideRGB.1 - outsideRGB.1)
+                + abs(insideRGB.2 - outsideRGB.2)) / 6
+            let difference = max(lumaDifference, colorDifference)
+            compared += 1
+            total += Double(difference)
+            if difference >= 8 { separated += 1 }
+        }
+        return compared >= 24
+            && (total / Double(compared) >= 5
+                || Double(separated) / Double(compared) >= 0.32)
+    }
+
+    private func contains(_ source: DNIRaster, _ point: CGPoint) -> Bool {
+        point.x >= 0 && point.x < CGFloat(source.width)
+            && point.y >= 0 && point.y < CGFloat(source.height)
+    }
 
     func raster(
         from sampleBuffer: CMSampleBuffer,
@@ -106,19 +179,70 @@ final class DNIImageFactory {
         paddingFraction: CGFloat,
         guardPixels: CGFloat = 1
     ) -> CGRect? {
-        let paddingX = (quad.topWidth + quad.bottomWidth) * 0.5 * max(0, paddingFraction)
-        let paddingY = (quad.leftHeight + quad.rightHeight) * 0.5 * max(0, paddingFraction)
-        let minX = floor((quad.points.map(\.x).min() ?? 0) - paddingX)
-        let maxX = ceil((quad.points.map(\.x).max() ?? 0) + paddingX)
-        let minY = floor((quad.points.map(\.y).min() ?? 0) - paddingY)
-        let maxY = ceil((quad.points.map(\.y).max() ?? 0) + paddingY)
-        guard minX >= guardPixels, minY >= guardPixels,
-              maxX <= CGFloat(source.width - 1) - guardPixels,
-              maxY <= CGFloat(source.height - 1) - guardPixels,
-              maxX - minX >= 2, maxY - minY >= 2 else {
-            return nil
-        }
-        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+        return adaptiveCropPlan(
+            from: source,
+            quad: quad,
+            desiredPaddingFraction: paddingFraction,
+            guardPixels: guardPixels
+        )?.rect
+    }
+
+    func usesReducedPadding(
+        from source: DNIRaster,
+        quad: DNIQuad,
+        desiredPaddingFraction: CGFloat
+    ) -> Bool {
+        return adaptiveCropPlan(
+            from: source,
+            quad: quad,
+            desiredPaddingFraction: desiredPaddingFraction,
+            guardPixels: 1
+        )?.reducedPadding ?? false
+    }
+
+    private func adaptiveCropPlan(
+        from source: DNIRaster,
+        quad: DNIQuad,
+        desiredPaddingFraction: CGFloat,
+        guardPixels: CGFloat
+    ) -> CropPlan? {
+        let minimumX = quad.points.map(\.x).min() ?? 0
+        let maximumX = quad.points.map(\.x).max() ?? 0
+        let minimumY = quad.points.map(\.y).min() ?? 0
+        let maximumY = quad.points.map(\.y).max() ?? 0
+        let averageWidth = (quad.topWidth + quad.bottomWidth) * 0.5
+        let averageHeight = (quad.leftHeight + quad.rightHeight) * 0.5
+        guard averageWidth >= 1, averageHeight >= 1 else { return nil }
+
+        let guardValue = max(0, guardPixels)
+        let availableLeft = minimumX - guardValue
+        let availableRight = CGFloat(source.width - 1) - guardValue - maximumX
+        let availableTop = minimumY - guardValue
+        let availableBottom = CGFloat(source.height - 1) - guardValue - maximumY
+        let requiredX = averageWidth * Self.minimumAdaptivePaddingFraction
+        let requiredY = averageHeight * Self.minimumAdaptivePaddingFraction
+        guard availableLeft >= requiredX, availableRight >= requiredX,
+              availableTop >= requiredY, availableBottom >= requiredY else { return nil }
+
+        let desiredX = averageWidth * max(0, desiredPaddingFraction)
+        let desiredY = averageHeight * max(0, desiredPaddingFraction)
+        let leftPadding = min(desiredX, availableLeft)
+        let rightPadding = min(desiredX, availableRight)
+        let topPadding = min(desiredY, availableTop)
+        let bottomPadding = min(desiredY, availableBottom)
+        let reduced = leftPadding + 0.5 < desiredX
+            || rightPadding + 0.5 < desiredX
+            || topPadding + 0.5 < desiredY
+            || bottomPadding + 0.5 < desiredY
+        let minX = floor(minimumX - leftPadding)
+        let maxX = ceil(maximumX + rightPadding)
+        let minY = floor(minimumY - topPadding)
+        let maxY = ceil(maximumY + bottomPadding)
+        guard maxX - minX >= 2, maxY - minY >= 2 else { return nil }
+        return CropPlan(
+            rect: CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY),
+            reducedPadding: reduced
+        )
     }
 
     func croppedImage(
@@ -233,13 +357,17 @@ final class DNIEngine {
     static let expectedAspect: CGFloat = 85.60 / 53.98
     static let minimumObservedAspect: CGFloat = 1.35
     static let maximumObservedAspect: CGFloat = 2.25
-    static let minimumDocumentArea: CGFloat = 0.16
-    static let maximumDocumentArea: CGFloat = 0.86
-    static let maximumCenterOffset: CGFloat = 0.25
-    static let maximumRectangleDeviationDegrees: CGFloat = 1.5
-    static let maximumSymmetricPerspectiveDeviationDegrees: CGFloat = 8
-    static let maximumTrapezoidSymmetryErrorDegrees: CGFloat = 2.5
-    static let maximumInPlaneRotationDegrees: CGFloat = 2
+    static let minimumDocumentArea: CGFloat = 0.10
+    static let maximumDocumentArea: CGFloat = 0.92
+    static let maximumCenterOffset: CGFloat = 0.43
+    static let maximumRectangleDeviationDegrees: CGFloat = 3
+    static let maximumSymmetricPerspectiveDeviationDegrees: CGFloat = 12
+    static let maximumTrapezoidSymmetryErrorDegrees: CGFloat = 5
+    static let maximumInPlaneRotationDegrees: CGFloat = 4
+    static let exitRectangleDeviationDegrees: CGFloat = 4
+    static let exitSymmetricPerspectiveDeviationDegrees: CGFloat = 15
+    static let exitTrapezoidSymmetryErrorDegrees: CGFloat = 7
+    static let exitInPlaneRotationDegrees: CGFloat = 5.5
     static let minimumBrightness = 36.0
     // Pale DNI v1/v2 stock is not overexposed merely because much of the card
     // is white. Require both a very high mean and substantial lost highlights.
@@ -253,9 +381,9 @@ final class DNIEngine {
     // Keep the dotted guide as an aiming aid. A card aligned by hand may sit a
     // few pixels outside it and should still be eligible when the source image
     // contains all four physical edges.
-    static let guideMarginPercent: CGFloat = 6
+    static let guideMarginPercent: CGFloat = 10
     static let stillDetectionMarginPercent: CGFloat = 8
-    static let minimumSharpness = 55.0
+    static let minimumSharpness = 38.0
     // Permissive diagnostics for downstream OCR. They do not gate capture.
     static let minimumOCRSharpness = 55.0
     static let minimumOCRBrightness = 35.0
@@ -263,8 +391,8 @@ final class DNIEngine {
     static let maximumOCRDarkClipping = 0.50
     static let maximumOCRHighlightClipping = 0.60
     static let maximumOCRGlare = 0.28
-    static let requiredStableFrames = 4
-    static let requiredStableDurationMs = 500
+    static let requiredStableFrames = 2
+    static let requiredStableDurationMs = 220
     private let imageFactory = DNIImageFactory.shared
 
     static func maximumGlare(for profile: DNIScanProfile) -> Double {
@@ -360,7 +488,7 @@ final class DNIEngine {
 
         let rectangleRequest = VNDetectRectanglesRequest()
         rectangleRequest.maximumObservations = 16
-        rectangleRequest.minimumConfidence = 0.28
+        rectangleRequest.minimumConfidence = 0.20
         rectangleRequest.minimumAspectRatio = 0.32
         rectangleRequest.maximumAspectRatio = 0.92
         rectangleRequest.minimumSize = 0.10
@@ -402,8 +530,8 @@ final class DNIEngine {
         prior: DNIQuad?,
         source: String
     ) -> (detection: DNIDetection, observation: VNRectangleObservation)? {
-        let margin = min(allowedRegion.width, allowedRegion.height) * guideMarginPercent / 100
-        let permitted = allowedRegion.insetBy(dx: -margin, dy: -margin)
+        // Keep the visual guide as a ranking target, not as a hard detector ROI.
+        let permitted = CGRect(x: 0.015, y: 0.015, width: 0.97, height: 0.97)
         let targetArea = allowedRegion.width > 0.90 && allowedRegion.height > 0.90
             ? CGFloat(0.47)
             : max(0.01, min(0.99, allowedRegion.width * allowedRegion.height))
@@ -412,11 +540,13 @@ final class DNIEngine {
             let normalized = normalizedQuad(observation)
             guard normalized.points.allSatisfy({ permitted.contains($0) }) else { continue }
             let quad = normalized.scaled(x: CGFloat(raster.width), y: CGFloat(raster.height))
+            guard DNIDocumentShapeGate.accepts(
+                quad, width: raster.width, height: raster.height
+            ) else { continue }
             let areaFraction = quad.area / CGFloat(raster.width * raster.height)
             guard areaFraction >= 0.10, areaFraction <= 0.94 else { continue }
             let height = (quad.leftHeight + quad.rightHeight) * 0.5
             let aspect = (quad.topWidth + quad.bottomWidth) * 0.5 / max(1, height)
-            guard aspect >= 1.08, aspect <= 2.75 else { continue }
             let center = normalized.center
             let centerOffset = hypot(center.x - 0.5, center.y - 0.5) / hypot(0.5, 0.5)
             let priorScore: CGFloat
@@ -433,7 +563,7 @@ final class DNIEngine {
             let score = CGFloat(observation.confidence) * 0.30
                 + shape * 0.20 + aspectScore * 0.16 + areaScore * 0.14
                 + max(0, 1 - centerOffset) * 0.08 + priorScore * 0.12
-            guard score >= 0.45 else { continue }
+            guard score >= 0.40 else { continue }
             let detection = DNIDetection(
                 quad: quad,
                 score: score,
@@ -590,18 +720,30 @@ final class DNIEngine {
         detection: DNIDetection,
         quality: DNIQuality,
         checks: DNIChecks,
-        profile: DNIScanProfile = .dni
+        profile: DNIScanProfile = .dni,
+        useExitGeometryLimits: Bool = false
     ) -> DNIAnalysisState {
         if checks.documentSize && detection.areaFraction < Self.minimumDocumentArea { return .moveCloser }
         if checks.documentSize && detection.areaFraction > Self.maximumDocumentArea { return .moveAway }
         if checks.centering && detection.centerOffset > Self.maximumCenterOffset { return .centerDocument }
-        if detection.quad.maximumInPlaneRotationDegrees
-            > Self.maximumInPlaneRotationDegrees { return .adjustPerspective }
-        if !detection.quad.hasAcceptablePerspective(
-            freeLimit: Self.maximumRectangleDeviationDegrees,
-            symmetricLimit: Self.maximumSymmetricPerspectiveDeviationDegrees,
-            symmetryTolerance: Self.maximumTrapezoidSymmetryErrorDegrees
-        ) { return .adjustPerspective }
+        if checks.perspective {
+            let rotationLimit = useExitGeometryLimits
+                ? Self.exitInPlaneRotationDegrees : Self.maximumInPlaneRotationDegrees
+            if detection.quad.maximumInPlaneRotationDegrees > rotationLimit {
+                return .adjustPerspective
+            }
+            if !detection.quad.hasAcceptablePerspective(
+                freeLimit: useExitGeometryLimits
+                    ? Self.exitRectangleDeviationDegrees
+                    : Self.maximumRectangleDeviationDegrees,
+                symmetricLimit: useExitGeometryLimits
+                    ? Self.exitSymmetricPerspectiveDeviationDegrees
+                    : Self.maximumSymmetricPerspectiveDeviationDegrees,
+                symmetryTolerance: useExitGeometryLimits
+                    ? Self.exitTrapezoidSymmetryErrorDegrees
+                    : Self.maximumTrapezoidSymmetryErrorDegrees
+            ) { return .adjustPerspective }
+        }
         if checks.brightness && (quality.brightness < Self.minimumBrightness || quality.darkClipping > Self.maximumDarkClipping) {
             return .improveLighting
         }
@@ -719,28 +861,21 @@ final class DNIStillProcessor {
                         source: "bounded_still"
                     )
                 } else {
-                    // Never allow a late Vision proposal to replace the stable
-                    // preview geometry with a materially different crop.
-                    detection = detectionForQuad(
-                        prior,
-                        score: min(stillDetection.score, 0.55),
-                        width: source.width,
-                        height: source.height,
-                        source: "preview_guard"
+                    throw DNIError.retry(
+                        "La fotografía no confirmó los cuatro bordes del DNI.",
+                        .searching
                     )
                 }
-            } else {
-                detection = detectionForQuad(
-                    prior,
-                    score: 0.50,
-                    width: source.width,
-                    height: source.height,
-                    source: "preview_fallback"
-                )
             }
         }
         guard let detection else {
             throw DNIError.retry("No se pudieron confirmar los cuatro bordes en la fotografía.", .searching)
+        }
+        guard factory.hasCompletePhysicalBorder(from: source, quad: detection.quad) else {
+            throw DNIError.retry(
+                "No se pudieron confirmar los cuatro bordes físicos del DNI.",
+                .edgeOccluded
+            )
         }
         guard factory.cropRect(
             from: source,
@@ -753,6 +888,11 @@ final class DNIStillProcessor {
                 .searching
             )
         }
+        let reducedPadding = factory.usesReducedPadding(
+            from: source,
+            quad: detection.quad,
+            desiredPaddingFraction: 0.06
+        )
         let preQuality = engine.evaluate(raster: source, quad: detection.quad)
         let preState = engine.classify(
             detection: detection,
@@ -841,7 +981,8 @@ final class DNIStillProcessor {
             height: corrected.height,
             detection: detection,
             quality: quality,
-            recognition: recognition
+            recognition: recognition,
+            reducedPadding: reducedPadding
         )
     }
 

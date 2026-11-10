@@ -2,7 +2,7 @@ package com.crediser.plugins.dniscanner;
 
 import android.graphics.PointF;
 
-/** Verifies that document candidates cannot escape the visible dotted guide. */
+/** Verifies that the visual guide is decoupled from the safe detection viewport. */
 public final class DetectionRegionHostTest {
     private DetectionRegionHostTest() {
     }
@@ -11,7 +11,7 @@ public final class DetectionRegionHostTest {
         DetectionRegion region = new DetectionRegion(
             1920f, 1080f,
             496f, 280f, 1424f, 866f,
-            0.06f
+            0.10f
         );
 
         DocumentQuad inside = quadFromView(region, 488f, 272f, 1432f, 874f, 512, 288);
@@ -28,18 +28,25 @@ public final class DetectionRegionHostTest {
             );
         }
 
-        DocumentQuad enclosingWindow = quadFromView(
-            region, 355f, 95f, 1608f, 1015f, 512, 288
+        DocumentQuad outsideGuideInsideViewport = quadFromView(
+            region, 355f, 95f, 1565f, 1015f, 512, 288
         );
-        if (region.contains(enclosingWindow, 512, 288)) {
-            throw new AssertionError("A rectangle outside the dotted guide was accepted");
+        if (!region.contains(outsideGuideInsideViewport, 512, 288)) {
+            throw new AssertionError("The visual guide was incorrectly used as a hard ROI");
+        }
+
+        DocumentQuad touchingPhysicalBoundary = quadFromView(
+            region, 3f, 3f, 1600f, 1000f, 512, 288
+        );
+        if (region.contains(touchingPhysicalBoundary, 512, 288)) {
+            throw new AssertionError("A rectangle touching the physical viewport was accepted");
         }
 
         float targetArea = region.targetAreaFraction(512, 288);
         if (Math.abs(targetArea - 0.2621f) > 0.002f) {
             throw new AssertionError("Unexpected guide target area: " + targetArea);
         }
-        if (Math.abs(region.marginPixels() - 35.16f) > 0.1f) {
+        if (Math.abs(region.marginPixels() - 58.6f) > 0.1f) {
             throw new AssertionError("Unexpected guide margin in view pixels");
         }
 
@@ -49,10 +56,11 @@ public final class DetectionRegionHostTest {
         float offsetY = (region.viewHeight - 288f * scale) * 0.5f;
         float mappedLeft = offsetX + frameBounds[0] * scale;
         float mappedTop = offsetY + frameBounds[1] * scale;
-        if (Math.abs(mappedLeft - (region.guideLeft - region.marginPixels())) > 1f
-            || Math.abs(mappedTop - (region.guideTop - region.marginPixels())) > 1f) {
+        float safeInset = Math.min(region.viewWidth, region.viewHeight) * 0.015f;
+        if (Math.abs(mappedLeft - safeInset) > 1f
+            || Math.abs(mappedTop - safeInset) > 1f) {
             throw new AssertionError(
-                "Guide-aligned fallback did not inherit the outward tolerance"
+                "Fallback search did not use the safe viewport"
             );
         }
     }

@@ -113,13 +113,15 @@ const result = await DniScanner.scan({
     autoCapture: true,
     preferredCaptureLongEdge: 2048,
     maxOutputLongEdge: 1280,
-    minEffectiveDocumentLongEdge: 1000,
-    minStillSharpnessVariance: 158,
+    minEffectiveDocumentLongEdge: 0,
+    minStillSharpnessVariance: 90,
     instructionText: "Ubicá el frente del DNI en el recuadro",
     checks: {
-        glare: true,
-        shadows: true,
-        edgeOcclusion: true
+        centering: false,
+        stability: false,
+        glare: false,
+        shadows: false,
+        edgeOcclusion: false
     },
     timeoutMs: 45000
 });
@@ -134,9 +136,9 @@ document.querySelector("img").src = result.imageUri;
 Use `side: "back"` to capture the back.
 
 The dotted rectangle is an aiming guide rather than a hard crop boundary. A DNI
-may extend slightly beyond it on any side; both platforms apply a 6% outward
-tolerance while still requiring all four physical edges and enough source-image
-clearance for the pixel-preserving crop.
+may extend beyond it on any side. Both platforms search a larger safe viewport
+while using the guide only as a scoring target. All four physical edges and a
+small source-image clearance are still mandatory.
 
 For a credit/debit card, driver's license, or another ISO ID-1-sized card, use the
 content-agnostic profile:
@@ -172,9 +174,9 @@ obstructions.
 | `preferredCaptureLongEdge` | integer `1280–2048` | `1600` | Preferred long edge for the native camera capture. Each platform selects the closest supported size, preferring a higher resolution before falling back to a lower one. |
 | `maxOutputLongEdge` | integer `640–2048` | `1280` | Independent maximum long edge of the cropped JPEG. The plugin never enlarges a document that contains fewer effective pixels. |
 | `minEffectiveDocumentLongEdge` | integer `0–4096` | `0` | Minimum native-pixel long edge measured on the detected document. A smaller photo is discarded and capture resumes. Zero keeps the legacy behavior and disables this gate; `1000` is recommended when OCR detail matters. |
-| `minStillSharpnessVariance` | number `1–10000` | Android `115`, iOS `70` | Minimum Laplacian variance of the cropped still photo when `checks.sharpness` is enabled. Defaults preserve each platform's previous behavior; use about `155–160` (for example `158`) for a stricter final-photo gate. |
+| `minStillSharpnessVariance` | number `1–10000` | Android `90`, iOS `70` | Minimum Laplacian variance of the cropped still photo when `checks.sharpness` is enabled. The preview uses a lower advisory threshold so AF/AE and the final still remain authoritative. |
 | `instructionText` | `string \| null` | `""` | Optional text above the guide. Missing, empty, or `null` hides it. |
-| `checks` | `object \| null` | standard checks enabled | Enables or disables individual acceptance checks. Missing properties stay enabled. |
+| `checks` | `object \| null` | OCR-friendly defaults | `documentSize`, `perspective`, `sharpness`, and `brightness` default to enabled. `centering`, `stability`, `glare`, `shadows`, and `edgeOcclusion` default to disabled. |
 | `timeoutMs` | integer `>= 0` | `0` | Maximum session duration. Zero disables the timeout. |
 
 Only one scan may run at a time.
@@ -187,15 +189,15 @@ Only one scan may run at a time.
 | --- | --- |
 | `documentSize` | Rejects a card that is too close or too far. |
 | `centering` | Requires the card near the guide. |
-| `perspective` | Retained as an accepted compatibility flag. Geometry is mandatory: only a rectangle (with 1.5 degrees of detection tolerance) or a clean near-isosceles trapezoid (up to 8 degrees, with at most 2.5 degrees of symmetry error) is accepted, and in-plane rotation is limited to 2 degrees. |
-| `stability` | Enables the longer stability hold and, when available, gyroscope and acceleration gating. A short multi-frame geometric confirmation remains mandatory when this check is disabled. |
+| `perspective` | When enabled, requires the card to be within 4 degrees of horizontal while accepting clean moderate perspective up to 12 degrees. Wider exit limits stabilize tracking but never authorize capture; visible instructions also use time hysteresis. When disabled, moderate alignment/perspective does not block, but the detector still requires a convex, reasonable, complete four-corner card. |
+| `stability` | Keeps the short visual two-frame confirmation. Inertial sensors remain diagnostic metadata and do not veto automatic or manual capture. |
 | `sharpness` | Rejects blur using Laplacian variance. |
 | `brightness` | Rejects under/overexposure and severe clipping. |
 | `glare` | Rejects large localized reflections. |
 | `shadows` | Rejects strong uneven illumination. |
 | `edgeOcclusion` | Retained for API compatibility. The new detector always requires a complete four-corner document; it no longer runs the former color-based finger heuristic. |
 
-Four-corner document detection, crop completeness, and the bounded symmetric-perspective rule are always required. Disabling another check reduces capture guarantees.
+Four-corner convex document detection and crop completeness are always required. Disabling another check reduces capture guarantees.
 
 ## Result
 
@@ -295,7 +297,7 @@ A successful scan resolves with metadata and a temporary JPEG:
 | `documentCandidate` | `true` when a card-like quadrilateral was detected, safely cropped, and returned. It is not an authenticity result. |
 | `usableForOcr` | Whether the final image meets permissive, non-configurable baseline exposure, focus, and severe-glare limits intended for downstream OCR. It does not block capture. |
 | `contentScore` | Position-independent printed-texture score. It is diagnostic and never blocks capture. |
-| `qualityWarnings` | Non-blocking warnings such as `low_sharpness`, `low_light`, `high_light`, `glare`, or `uneven_lighting`. With the sharpness check enabled, a value below `minStillSharpnessVariance` is recaptured instead of returned; `low_sharpness` can only be returned when that check is disabled. |
+| `qualityWarnings` | Non-blocking warnings such as `low_sharpness`, `low_light`, `high_light`, `glare`, `uneven_lighting`, or `reduced_padding`. With the sharpness check enabled, a value below `minStillSharpnessVariance` is recaptured instead of returned. `reduced_padding` means the complete card was retained with less than the desired padding on one or more sides. |
 | `confidence` | `document`, `content`, optional `side`/`variant`, and `overall` heuristic scores. |
 | `rawWidth` / `rawHeight` | Oriented native photograph dimensions before document detection, cropping, and output resizing. |
 | `effectiveDocumentLongEdge` | Estimated native-pixel long edge of the detected document before cropping. It explains the useful source resolution and never causes upscaling. |
@@ -359,22 +361,21 @@ Quality rejection does not produce `PROCESSING_FAILED`; the image is discarded a
 - Android uses CameraX `Preview`, `ImageAnalysis`, and `ImageCapture`. A bundled OpenCV engine runs contour proposals from Canny, difference-of-Gaussians, CLAHE, and adaptive-threshold strategies. Candidates must have evidence on all four sides and are ranked against the guide and the active track.
 - Android follows the chosen quadrilateral with pyramidal Lucas-Kanade optical flow, periodically anchors it with a full contour pass, smooths corner motion, and measures stability from normalized displacement, area change, and elapsed time.
 - iOS uses `AVCaptureVideoPreviewLayer`, `AVCaptureVideoDataOutput`, and `AVCapturePhotoOutput`. `VNDetectDocumentSegmentationRequest` is the primary detector, `VNDetectRectanglesRequest` is the native fallback, and `VNTrackRectangleRequest` maintains the document between full detections.
-- Both platforms analyze reduced preview frames away from the UI thread, start AF/AE while the track is settling, keep analysis active through focusing, revalidate fresh geometry before the shutter, and expose a manual capture button.
-- On iOS, the analysis frame is center-cropped to the same aspect-fill viewport shown by the camera preview. The accepted region is derived from the visible dotted guide, so size, centering, and boundary checks refer to what the user actually sees.
-- The dotted guide has a 6% outward tolerance on Android and iOS. This lets users align a DNI directly with the guide even when hand framing leaves a few pixels outside it; mandatory crop-integrity checks still reject a document actually truncated by the camera source.
-- Framing, perspective, in-plane alignment, stability, focus, exposure, glare, shadows, and edge obstruction are checked before capture and rechecked on the photograph. The returned JPEG is an axis-aligned bounding crop with a 6% safety margin; it does not straighten or warp the detected quadrilateral.
+- Both platforms analyze reduced preview frames away from the UI thread, start AF/AE while the track is settling, keep analysis active through focusing, and expose a manual capture button. Once capture starts, small preview or sensor changes do not cancel the shutter; the still photo confirms borders, focus, and exposure.
+- The portrait guide uses about 80% of the viewport width and the landscape guide about 72%. Detection is decoupled from that guide and searches the safe viewport, so size and centering influence ranking or instructions rather than acting as a guide boundary.
+- Framing, optional perspective, focus, and exposure are checked before capture and rechecked on the photograph. The returned JPEG is an axis-aligned bounding crop that targets 6% padding independently on each side; a complete document with at least 1.75% available clearance is accepted with `reduced_padding`. It never straightens or warps the detected quadrilateral.
 - Exposure validation treats pale DNI v1/v2 stock separately from true overexposure: `Demasiada luz` requires both a very high document-wide mean luminance and more than 65% highlight clipping. A locally blown reflection remains independently rejectable as glare, so white paper no longer fails solely because much of its surface is naturally bright.
-- When `checks.stability` is enabled, Android uses the device gyroscope and acceleration sensors while iOS samples rotation and user acceleration through Core Motion at approximately 50 Hz. Movement blocks analysis and the shutter; once a JPEG exists, measured image sharpness decides whether it is accepted instead of a later transient sensor spike. Missing, late, or stale sensors fall back to visual stability instead of blocking capture.
-- Android always confirms a compatible quadrilateral across several frames, even when `checks.stability` is disabled. Disabling stability skips the longer hold and sensor gate; it no longer permits capture from one isolated detection.
-- Android crop integrity is mandatory: every detected side must leave enough source-image clearance for an independent outward safety margin. A capture that would clamp or lose any edge is discarded and scanning resumes.
-- Stable valid frames trigger center-of-document focus and exposure metering. The UI distinguishes `Enfocando…`, `Tomando foto`, and `Procesando imagen…`: capture proceeds as soon as AF/AE settles or after a bounded 700 ms fallback, and the live camera preview remains visible while local validation runs so retryable rejection can continue without a visual interruption or camera-session restart.
+- Android and iOS record gyroscope and acceleration data as diagnostics. Normal hand motion never changes `READY` back to `HOLD_STILL`, never blocks the manual button, and never cancels a capture already in progress. Final still-image sharpness is authoritative.
+- Both platforms confirm a compatible quadrilateral for two frames and roughly 200–220 ms, retain a track across up to five missed frames, and use entry/exit hysteresis so one detector fluctuation does not regress progress.
+- Crop integrity is mandatory: every detected side must retain at least the minimum source clearance. Desired padding is reduced independently per side rather than rejecting an otherwise complete card.
+- Stable valid frames trigger center-of-document focus and exposure metering. The UI distinguishes `Enfocando…`, `Tomando foto`, and `Procesando imagen…`: capture proceeds as soon as AF/AE settles or after a bounded 425 ms fallback, and the live camera preview remains visible while local validation runs.
 - `preferredCaptureLongEdge` controls the native capture target (1600 px by default; `2048` is supported with CameraX's closest-higher-then-lower fallback), while `maxOutputLongEdge` independently caps the cropped JPEG at 1280 px by default. JPEG quality remains 95 and a low-resolution document is never enlarged. Colors and captured geometry are preserved without paper-scanner filters.
-- In landscape, the guide uses 80% of the viewport height. Instruction and status messages move inside the top and bottom of the guide so they do not reserve vertical capture space.
+- In landscape, the guide leaves additional physical margin around the card. Instruction and status messages move inside the top and bottom of the guide so they do not reserve vertical capture space.
 - In the default `dni` profile, a position-independent printed-content score is returned for downstream diagnostics and never blocks capture. In `advisory` or `strict`, a compact 4×3 edge/saturation classifier also estimates side and generation; those estimates remain heuristic and variant never blocks capture. The `genericCard` profile skips those content heuristics and applies quality thresholds suited to visually diverse ID-1 cards.
 
-The main status message and dotted guide always use the same ML Kit Face Capture palette: green (`#4ADE80`) means the current position is correct and is being stabilized, captured, or processed; yellow (`#FACC15`) means an actionable adjustment is still needed or AF/AE is currently focusing; red (`#EF4444`) means no usable candidate is present or a failed attempt has restarted. Live instruction changes are confirmed for 500 ms to remain readable. A failed-still message and its red guide are frozen for 1000 ms before returning to live search, matching Face Capture's default retry feedback. Built-in scanner messages are currently in Spanish. `debugMode` is disabled by default; when enabled, it adds the detected quadrilateral and a lower-corner diagnostic overlay without moving or resizing any scanner UI. The overlay reports detector source/state, frame size, candidate score/aspect/area, rectangularity/perspective, quality, visual stability, validation gates, and device movement. Debug values use green for accepted, red for rejected, and gray for disabled, unavailable, or not yet sampling.
+The main status message and dotted guide use a stable neutral/yellow/green palette: neutral gray while searching or retrying, yellow only for a persistent actionable correction, and green once the document is accepted, focusing, capturing, processing, or complete. Live instruction changes are confirmed for 650 ms and tracking loss has a 500 ms grace. A failed-still message is frozen for 1000 ms before returning to live search. Built-in scanner messages are currently in Spanish. `debugMode` is disabled by default; when enabled, it adds the detected quadrilateral and a lower-corner diagnostic overlay without moving or resizing any scanner UI.
 
-A five-segment progress indicator mirrors ML Kit Face Capture without changing capture gates: document detection, framing/perspective, visual quality, stability, and final capture. Completed stages are green, the current stage is yellow, and future stages are translucent white, with the same 260 ms color transition. A tracking interruption shorter than 300 ms does not regress visible progress. The fifth segment uses intermediate green (`#A2D54B`) during `Tomando foto` and `Procesando imagen…`, because final-photo validation can still reject the attempt. Only an accepted result turns all five segments fully green and displays the same `✓ Listo` final message as Face Capture for 260 ms before returning to Cordova. In portrait, the instruction label, dotted guide, progress bar, and status label use matching vertical gaps. The diagnostic panel remains an independent absolute overlay and may overlap them without affecting scanner geometry.
+A five-segment progress indicator shows document detection, framing/perspective, visual quality, stability, and final capture. Completed stages are green, the current stage is yellow, and future stages are translucent white, with a 260 ms color transition. One or two missed observations do not regress visible progress. The fifth segment uses intermediate green (`#A2D54B`) during `Tomando foto` and `Procesando imagen…`; only an accepted result turns all five segments fully green and displays `✓ Listo` for 260 ms before returning to Cordova.
 
 An iOS landscape session supports both `landscapeLeft` and `landscapeRight`. The preview, analyzed frames, captured photo, overlay, and controls update together when the device is rotated 180 degrees.
 

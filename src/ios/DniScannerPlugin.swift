@@ -138,6 +138,10 @@ final class DniScanner: CDVPlugin {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
+        var warnings = qualityWarnings(scan.quality, options: options)
+        if scan.reducedPadding {
+            warnings.append("reduced_padding")
+        }
         return [
             "status": "success",
             "imageUri": imageWebURL(fileName: scan.fileURL.lastPathComponent),
@@ -151,7 +155,7 @@ final class DniScanner: CDVPlugin {
             "documentCandidate": true,
             "usableForOcr": usable,
             "contentScore": round(recognition.contentScore),
-            "qualityWarnings": qualityWarnings(scan.quality, options: options),
+            "qualityWarnings": warnings,
             "confidence": [
                 "document": round(documentConfidence),
                 "content": round(recognition.contentScore),

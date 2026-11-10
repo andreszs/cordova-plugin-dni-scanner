@@ -297,6 +297,89 @@ final class DocumentQuad {
 }
 
 /**
+ * One platform-wide admission gate for detector and tracker geometry. It is
+ * deliberately wider than capture policy: rotation is unrestricted and clean
+ * moderate perspective remains valid, but a glare-generated corner cannot seed
+ * a stable track merely because its contour has strong edges.
+ */
+final class DocumentShapeGate {
+    static final float MINIMUM_ASPECT = 1.20f;
+    static final float MAXIMUM_ASPECT = 2.15f;
+    static final float MINIMUM_OPPOSITE_SIDE_RATIO = 0.55f;
+    static final float FREE_CORNER_DEVIATION_DEGREES = 5f;
+    static final float MAXIMUM_CORNER_DEVIATION_DEGREES = 18f;
+    static final float MAXIMUM_SYMMETRY_ERROR_DEGREES = 10f;
+    static final float MINIMUM_AREA_FRACTION = 0.08f;
+    static final float MAXIMUM_AREA_FRACTION = 0.95f;
+
+    private DocumentShapeGate() {
+    }
+
+    static boolean accepts(DocumentQuad quad, int width, int height) {
+        if (quad == null || width < 2 || height < 2 || !isConvex(quad)) {
+            return false;
+        }
+        for (PointF point : quad.points()) {
+            if (point.x < 0f || point.y < 0f || point.x >= width || point.y >= height) {
+                return false;
+            }
+        }
+        float areaFraction = quad.area() / Math.max(1f, width * (float) height);
+        if (areaFraction < MINIMUM_AREA_FRACTION
+            || areaFraction > MAXIMUM_AREA_FRACTION) {
+            return false;
+        }
+        float averageWidth = (quad.topWidth() + quad.bottomWidth()) * 0.5f;
+        float averageHeight = (quad.leftHeight() + quad.rightHeight()) * 0.5f;
+        float aspect = averageWidth / Math.max(1f, averageHeight);
+        if (aspect < MINIMUM_ASPECT || aspect > MAXIMUM_ASPECT) {
+            return false;
+        }
+        if (ratio(quad.topWidth(), quad.bottomWidth()) < MINIMUM_OPPOSITE_SIDE_RATIO
+            || ratio(quad.leftHeight(), quad.rightHeight()) < MINIMUM_OPPOSITE_SIDE_RATIO
+            || ratio(
+                DocumentQuad.distance(quad.topLeft, quad.bottomRight),
+                DocumentQuad.distance(quad.topRight, quad.bottomLeft)
+            ) < MINIMUM_OPPOSITE_SIDE_RATIO) {
+            return false;
+        }
+        return quad.hasAcceptablePerspective(
+            FREE_CORNER_DEVIATION_DEGREES,
+            MAXIMUM_CORNER_DEVIATION_DEGREES,
+            MAXIMUM_SYMMETRY_ERROR_DEGREES
+        );
+    }
+
+    private static boolean isConvex(DocumentQuad quad) {
+        PointF[] points = {
+            quad.topLeft, quad.topRight, quad.bottomRight, quad.bottomLeft
+        };
+        float sign = 0f;
+        for (int index = 0; index < points.length; index++) {
+            PointF first = points[index];
+            PointF second = points[(index + 1) % points.length];
+            PointF third = points[(index + 2) % points.length];
+            float cross = (second.x - first.x) * (third.y - second.y)
+                - (second.y - first.y) * (third.x - second.x);
+            if (Math.abs(cross) < 1e-3f) {
+                return false;
+            }
+            if (sign == 0f) {
+                sign = Math.signum(cross);
+            } else if (cross * sign < 0f) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static float ratio(float first, float second) {
+        float maximum = Math.max(first, second);
+        return maximum < 1e-4f ? 0f : Math.min(first, second) / maximum;
+    }
+}
+
+/**
  * Maps the visible guide to analyzed and captured frames using the same
  * FILL_CENTER transform used by PreviewView and ScannerOverlayView.
  */
@@ -331,12 +414,14 @@ final class DetectionRegion {
         float scale = fillCenterScale(frameWidth, frameHeight);
         float offsetX = (viewWidth - frameWidth * scale) * 0.5f;
         float offsetY = (viewHeight - frameHeight * scale) * 0.5f;
-        float margin = Math.min(guideRight - guideLeft, guideBottom - guideTop)
-            * marginFraction;
-        float allowedLeft = Math.max(0f, guideLeft - margin);
-        float allowedTop = Math.max(0f, guideTop - margin);
-        float allowedRight = Math.min(viewWidth, guideRight + margin);
-        float allowedBottom = Math.min(viewHeight, guideBottom + margin);
+        // The dotted guide is only an aiming aid. Detection uses the full safe
+        // viewport so a complete card can extend beyond the guide without being
+        // rejected before geometry and still-photo validation run.
+        float safeInset = Math.max(1f, Math.min(viewWidth, viewHeight) * 0.015f);
+        float allowedLeft = safeInset;
+        float allowedTop = safeInset;
+        float allowedRight = viewWidth - safeInset;
+        float allowedBottom = viewHeight - safeInset;
         for (PointF point : quad.points()) {
             float viewX = offsetX + point.x * scale;
             float viewY = offsetY + point.y * scale;
@@ -368,15 +453,11 @@ final class DetectionRegion {
         float scale = fillCenterScale(frameWidth, frameHeight);
         float offsetX = (viewWidth - frameWidth * scale) * 0.5f;
         float offsetY = (viewHeight - frameHeight * scale) * 0.5f;
-        float margin = Math.min(guideRight - guideLeft, guideBottom - guideTop)
-            * marginFraction;
-        // The pale-edge fallback must search the same outward-tolerant region
-        // accepted by contains(); otherwise the tolerance disappears precisely
-        // on white backgrounds where that fallback is needed most.
-        float allowedLeft = Math.max(0f, guideLeft - margin);
-        float allowedTop = Math.max(0f, guideTop - margin);
-        float allowedRight = Math.min(viewWidth, guideRight + margin);
-        float allowedBottom = Math.min(viewHeight, guideBottom + margin);
+        float safeInset = Math.max(1f, Math.min(viewWidth, viewHeight) * 0.015f);
+        float allowedLeft = safeInset;
+        float allowedTop = safeInset;
+        float allowedRight = viewWidth - safeInset;
+        float allowedBottom = viewHeight - safeInset;
         return new float[] {
             Math.max(1f, (allowedLeft - offsetX) / scale),
             Math.max(1f, (allowedTop - offsetY) / scale),
@@ -492,7 +573,7 @@ final class ScanChecks {
     }
 
     static ScanChecks defaults() {
-        return new ScanChecks(true, true, true, true, true, true, true, true, true);
+        return new ScanChecks(true, false, true, false, true, true, false, false, false);
     }
 }
 

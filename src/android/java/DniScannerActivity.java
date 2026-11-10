@@ -257,7 +257,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     protected void onResume() {
         super.onResume();
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME);
-        if (motionMonitor != null && checks != null && checks.stability) {
+        if (motionMonitor != null) {
             motionMonitor.start();
         }
     }
@@ -731,11 +731,6 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         }
         MotionSnapshot motion = motionSnapshot();
         AnalysisResult displayedResult = result;
-        if (checks.stability
-            && result.state == AnalysisResult.State.READY
-            && !motion.stable) {
-            displayedResult = copyAnalysisWithState(result, AnalysisResult.State.HOLD_STILL);
-        }
         displayedResult.motion = motion;
         if (debugMode && (displayedResult.state != lastTraceState
                 || displayedResult.timestampMs - lastTraceAnalysisMs >= 500L)) {
@@ -774,8 +769,10 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
                 frameHeight,
                 statusText(instructionState)
             );
-            if (finalDisplayedResult.state == AnalysisResult.State.HOLD_STILL
-                && finalDisplayedResult.stableDurationMs >= 180L) {
+            if (finalDisplayedResult.detection != null
+                && (finalDisplayedResult.state == AnalysisResult.State.HOLD_STILL
+                    || finalDisplayedResult.state == AnalysisResult.State.WAITING_FOR_FOCUS
+                    || finalDisplayedResult.state == AnalysisResult.State.READY)) {
                 warmFocusAtDocument(finalDisplayedResult);
             }
             if (autoCapture && finalDisplayedResult.state == AnalysisResult.State.READY) {
@@ -807,9 +804,6 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             return;
         }
         MotionSnapshot motion = motionSnapshot();
-        if (!manual && checks.stability && !motion.stable) {
-            return;
-        }
         lockAutoOrientationForCapture();
         capturing = true;
         manualCaptureRequested = manual;
@@ -842,10 +836,6 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             config.focusMeteringTimeoutMs
         );
 
-        if (!manualCaptureRequested && !hasFreshCaptureGeometry()) {
-            retryAfterInvalidStill(statusText(AnalysisResult.State.HOLD_STILL));
-            return;
-        }
         if (camera == null || latestAnalysis == null || latestAnalysis.detection == null
             || latestFrameWidth <= 0 || latestFrameHeight <= 0
             || previewView.getWidth() <= 0 || previewView.getHeight() <= 0) {
@@ -882,10 +872,6 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         focusMeteringPending = false;
         trace("capture:focus_complete sequence=" + sequence
             + " freshGeometry=" + hasFreshCaptureGeometry());
-        if (!manualCaptureRequested && !hasFreshCaptureGeometry()) {
-            retryAfterInvalidStill(statusText(AnalysisResult.State.HOLD_STILL));
-            return;
-        }
         captureStillImage();
     }
 
@@ -898,10 +884,6 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             + " detection=" + detectionText(
                 latestAnalysis == null ? null : latestAnalysis.detection
             ));
-        if (checks.stability && !motion.stable) {
-            retryAfterDeviceMotion();
-            return;
-        }
         showCaptureStage(
             AnalysisResult.State.CAPTURING,
             "Tomando foto",
@@ -1039,7 +1021,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     }
 
     private MotionSnapshot motionSnapshot() {
-        if (motionMonitor == null || !checks.stability) {
+        if (motionMonitor == null) {
             return new MotionSnapshot(
                 false,
                 false,
@@ -1312,6 +1294,9 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             }
         }
         JSONArray warnings = qualityWarnings(quality);
+        if (result.reducedPadding) {
+            warnings.put("reduced_padding");
+        }
 
         JSONObject json = new JSONObject();
         json.put("status", "success");
@@ -1367,14 +1352,14 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         JSONObject source = value == null ? new JSONObject() : value;
         return new ScanChecks(
             source.optBoolean("documentSize", true),
-            source.optBoolean("centering", true),
-            true,
-            source.optBoolean("stability", true),
+            source.optBoolean("centering", false),
+            source.optBoolean("perspective", true),
+            source.optBoolean("stability", false),
             source.optBoolean("sharpness", true),
             source.optBoolean("brightness", true),
-            source.optBoolean("glare", true),
-            source.optBoolean("shadows", true),
-            source.optBoolean("edgeOcclusion", true)
+            source.optBoolean("glare", false),
+            source.optBoolean("shadows", false),
+            source.optBoolean("edgeOcclusion", false)
         );
     }
 
@@ -1495,7 +1480,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             case WAITING_FOR_FOCUS:
                 return "Enfocá el DNI";
             case READY:
-                return "No muevas el celular";
+                return "Listo para capturar";
             case FOCUSING:
                 return "Enfocando…";
             case CAPTURING:

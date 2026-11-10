@@ -37,14 +37,14 @@ struct DNIChecks {
 
     static let defaults = DNIChecks(
         documentSize: true,
-        centering: true,
+        centering: false,
         perspective: true,
-        stability: true,
+        stability: false,
         sharpness: true,
         brightness: true,
-        glare: true,
-        shadows: true,
-        edgeOcclusion: true
+        glare: false,
+        shadows: false,
+        edgeOcclusion: false
     )
 
     init(dictionary: [String: Any]?) throws {
@@ -66,16 +66,14 @@ struct DNIChecks {
             return source[name] as? Bool ?? fallback
         }
         documentSize = bool("documentSize", true)
-        centering = bool("centering", true)
-        // Kept as an accepted input for API compatibility, but geometric
-        // perspective integrity is now a mandatory capture requirement.
-        perspective = true
-        stability = bool("stability", true)
+        centering = bool("centering", false)
+        perspective = bool("perspective", true)
+        stability = bool("stability", false)
         sharpness = bool("sharpness", true)
         brightness = bool("brightness", true)
-        glare = bool("glare", true)
-        shadows = bool("shadows", true)
-        edgeOcclusion = bool("edgeOcclusion", true)
+        glare = bool("glare", false)
+        shadows = bool("shadows", false)
+        edgeOcclusion = bool("edgeOcclusion", false)
     }
 
     private init(
@@ -498,6 +496,70 @@ struct DNIQuad {
     }
 }
 
+/// Shared admission gate for Vision proposals and tracked rectangles. Capture
+/// thresholds remain stricter; this gate only removes physically implausible
+/// ID-1 shapes before they can acquire temporal confidence.
+enum DNIDocumentShapeGate {
+    static let minimumAspect: CGFloat = 1.20
+    static let maximumAspect: CGFloat = 2.15
+    static let minimumOppositeSideRatio: CGFloat = 0.55
+    static let freeCornerDeviationDegrees: CGFloat = 5
+    static let maximumCornerDeviationDegrees: CGFloat = 18
+    static let maximumSymmetryErrorDegrees: CGFloat = 10
+    static let minimumAreaFraction: CGFloat = 0.08
+    static let maximumAreaFraction: CGFloat = 0.95
+
+    static func accepts(_ quad: DNIQuad, width: Int, height: Int) -> Bool {
+        guard width >= 2, height >= 2, isConvex(quad),
+              quad.points.allSatisfy({
+                  $0.x >= 0 && $0.y >= 0
+                      && $0.x < CGFloat(width) && $0.y < CGFloat(height)
+              }) else { return false }
+        let areaFraction = quad.area / max(1, CGFloat(width * height))
+        guard areaFraction >= minimumAreaFraction,
+              areaFraction <= maximumAreaFraction else { return false }
+        let averageWidth = (quad.topWidth + quad.bottomWidth) * 0.5
+        let averageHeight = (quad.leftHeight + quad.rightHeight) * 0.5
+        let aspect = averageWidth / max(1, averageHeight)
+        guard aspect >= minimumAspect, aspect <= maximumAspect,
+              ratio(quad.topWidth, quad.bottomWidth) >= minimumOppositeSideRatio,
+              ratio(quad.leftHeight, quad.rightHeight) >= minimumOppositeSideRatio,
+              ratio(
+                  quad.topLeft.distance(to: quad.bottomRight),
+                  quad.topRight.distance(to: quad.bottomLeft)
+              ) >= minimumOppositeSideRatio else { return false }
+        return quad.hasAcceptablePerspective(
+            freeLimit: freeCornerDeviationDegrees,
+            symmetricLimit: maximumCornerDeviationDegrees,
+            symmetryTolerance: maximumSymmetryErrorDegrees
+        )
+    }
+
+    private static func isConvex(_ quad: DNIQuad) -> Bool {
+        let points = quad.points
+        var sign: CGFloat = 0
+        for index in points.indices {
+            let first = points[index]
+            let second = points[(index + 1) % points.count]
+            let third = points[(index + 2) % points.count]
+            let cross = (second.x - first.x) * (third.y - second.y)
+                - (second.y - first.y) * (third.x - second.x)
+            guard abs(cross) >= 0.0001 else { return false }
+            if sign == 0 {
+                sign = cross < 0 ? -1 : 1
+            } else if cross * sign < 0 {
+                return false
+            }
+        }
+        return true
+    }
+
+    private static func ratio(_ first: CGFloat, _ second: CGFloat) -> CGFloat {
+        let maximum = max(first, second)
+        return maximum < 0.0001 ? 0 : min(first, second) / maximum
+    }
+}
+
 extension CGPoint {
     func distance(to other: CGPoint) -> CGFloat {
         return hypot(x - other.x, y - other.y)
@@ -671,4 +733,5 @@ struct DNIProcessedScan {
     let detection: DNIDetection
     let quality: DNIQuality
     let recognition: DNIRecognition
+    let reducedPadding: Bool
 }

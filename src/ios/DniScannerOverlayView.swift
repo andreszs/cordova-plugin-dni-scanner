@@ -48,12 +48,11 @@ final class DNIOverlayView: UIView {
 
     func guideRect(in bounds: CGRect? = nil) -> CGRect {
         let area = bounds ?? self.bounds
-        let horizontalMargin: CGFloat = 20
-        var width = max(1, area.width - horizontalMargin * 2)
-        var height = width / DNIEngine.expectedAspect
         let usesLandscapeLayout = scanOrientation == "landscape"
             || (scanOrientation == "auto" && area.width > area.height)
-        let maximumHeight = area.height * (usesLandscapeLayout ? 0.80 : 0.46)
+        var width = max(1, area.width * (usesLandscapeLayout ? 0.72 : 0.80))
+        var height = width / DNIEngine.expectedAspect
+        let maximumHeight = area.height * (usesLandscapeLayout ? 0.72 : 0.44)
         if height > maximumHeight {
             height = maximumHeight
             width = height * DNIEngine.expectedAspect
@@ -516,12 +515,10 @@ final class DNIOverlayView: UIView {
 
     private func colorForState(_ state: DNIAnalysisState) -> UIColor {
         switch state {
-        case .holdStill, .waitingForFocus, .ready, .capturing, .processing, .success:
+        case .ready, .focusing, .capturing, .processing, .success:
             return UIColor(red: 0.29, green: 0.87, blue: 0.50, alpha: 1)
         case .searching, .retrying:
-            return UIColor(red: 0.94, green: 0.27, blue: 0.27, alpha: 1)
-        case .focusing:
-            return UIColor(red: 0.98, green: 0.80, blue: 0.08, alpha: 1)
+            return UIColor(white: 0.64, alpha: 1)
         default:
             return UIColor(red: 0.98, green: 0.80, blue: 0.08, alpha: 1)
         }

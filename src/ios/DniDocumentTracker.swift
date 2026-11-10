@@ -17,6 +17,9 @@ final class DNIDocumentTracker {
     private var missedFrames = 0
     private var stableSince: CFTimeInterval = 0
     private var stableFrames = 0
+    private var geometryAccepted = false
+    private var adjustPerspectiveSince: CFTimeInterval = 0
+    private var forceGlobalDetection = false
 
     func update(
         raster: DNIRaster,
@@ -26,7 +29,10 @@ final class DNIDocumentTracker {
         at timestamp: CFTimeInterval
     ) throws -> DNIAnalysis {
         var pair: (detection: DNIDetection, observation: VNRectangleObservation)?
-        let shouldDetect = observation == nil || frameIndex % 5 == 0 || missedFrames > 0
+        let globalRecovery = forceGlobalDetection
+        forceGlobalDetection = false
+        let shouldDetect = globalRecovery || observation == nil
+            || frameIndex % 5 == 0 || missedFrames > 0
         frameIndex += 1
 
         if !shouldDetect, let currentObservation = observation {
@@ -59,7 +65,7 @@ final class DNIDocumentTracker {
                 raster: raster,
                 allowedRegion: allowedRegion,
                 guideMarginPercent: DNIEngine.guideMarginPercent,
-                prior: smoothedQuad
+                prior: globalRecovery ? nil : smoothedQuad
             )
             if pair == nil, smoothedQuad != nil {
                 pair = try engine.detectWithObservation(
@@ -73,7 +79,7 @@ final class DNIDocumentTracker {
 
         guard let current = pair else {
             missedFrames += 1
-            if missedFrames <= 2, let previous = lastDetection {
+            if missedFrames <= 5, let previous = lastDetection {
                 stableFrames = max(0, stableFrames - 1)
                 return DNIAnalysis(
                     state: .holdStill,
@@ -124,16 +130,42 @@ final class DNIDocumentTracker {
             detection: detection,
             quality: quality,
             checks: checks,
-            profile: profile
+            profile: profile,
+            useExitGeometryLimits: geometryAccepted
         )
+        geometryAccepted = geometryIsAccepted(
+            detection.quad,
+            checks: checks,
+            useExit: geometryAccepted
+        )
+        // Wider exit thresholds smooth tracking only. A shutter-ready frame must
+        // satisfy the strict entry geometry so visible roll cannot slip through.
+        if state == .ready && !geometryIsAccepted(
+            detection.quad,
+            checks: checks,
+            useExit: false
+        ) {
+            state = .adjustPerspective
+        }
         let duration = stableSince == 0
             ? 0 : Int(max(0, timestamp - stableSince) * 1000)
-        let requiredFrames = checks.stability ? 4 : 2
+        let requiredFrames = DNIEngine.requiredStableFrames
         let requiredDuration = checks.stability
-            ? DNIEngine.requiredStableDurationMs : 240
+            ? DNIEngine.requiredStableDurationMs : 200
         if state == .ready
             && (!stable || stableFrames < requiredFrames || duration < requiredDuration) {
             state = .holdStill
+        }
+        if state == .adjustPerspective {
+            if adjustPerspectiveSince == 0 {
+                adjustPerspectiveSince = timestamp
+            } else if timestamp - adjustPerspectiveSince >= 0.65 {
+                forceGlobalDetection = true
+                observation = nil
+                adjustPerspectiveSince = timestamp
+            }
+        } else {
+            adjustPerspectiveSince = 0
         }
         return DNIAnalysis(
             state: state,
@@ -198,6 +230,29 @@ final class DNIDocumentTracker {
         )
     }
 
+    private func geometryIsAccepted(
+        _ quad: DNIQuad,
+        checks: DNIChecks,
+        useExit: Bool
+    ) -> Bool {
+        guard checks.perspective else { return true }
+        let rotationLimit = useExit
+            ? DNIEngine.exitInPlaneRotationDegrees
+            : DNIEngine.maximumInPlaneRotationDegrees
+        return quad.maximumInPlaneRotationDegrees <= rotationLimit
+            && quad.hasAcceptablePerspective(
+                freeLimit: useExit
+                    ? DNIEngine.exitRectangleDeviationDegrees
+                    : DNIEngine.maximumRectangleDeviationDegrees,
+                symmetricLimit: useExit
+                    ? DNIEngine.exitSymmetricPerspectiveDeviationDegrees
+                    : DNIEngine.maximumSymmetricPerspectiveDeviationDegrees,
+                symmetryTolerance: useExit
+                    ? DNIEngine.exitTrapezoidSymmetryErrorDegrees
+                    : DNIEngine.maximumTrapezoidSymmetryErrorDegrees
+            )
+    }
+
     func reset() {
         sequenceHandler = VNSequenceRequestHandler()
         observation = nil
@@ -208,5 +263,8 @@ final class DNIDocumentTracker {
         missedFrames = 0
         stableSince = 0
         stableFrames = 0
+        geometryAccepted = false
+        adjustPerspectiveSince = 0
+        forceGlobalDetection = false
     }
 }

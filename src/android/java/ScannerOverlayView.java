@@ -235,16 +235,16 @@ final class ScannerOverlayView extends View {
         rows.add(new DebugRow(
             String.format(Locale.US, "score/aspect: %.3f/%.3f", detection.score,
                 detection.observedAspect),
-            detection.score >= 0.48f
+            detection.score >= 0.40f
                 && detection.observedAspect >= 1.08f,
             true
         ));
         rows.add(new DebugRow(
             String.format(Locale.US, "area/center: %.3f/%.3f", detection.areaFraction,
                 detection.centerOffset),
-            detection.areaFraction >= 0.14f
-                && detection.areaFraction <= 0.88f
-                && detection.centerOffset <= 0.34f,
+            detection.areaFraction >= ScannerConfig.MINIMUM_DOCUMENT_AREA
+                && detection.areaFraction <= ScannerConfig.MAXIMUM_DOCUMENT_AREA
+                && detection.centerOffset <= ScannerConfig.MAXIMUM_CENTER_OFFSET,
             checks.documentSize || checks.centering
         ));
         rows.add(new DebugRow(
@@ -261,7 +261,7 @@ final class ScannerOverlayView extends View {
         ));
         rows.add(new DebugRow(
             String.format(Locale.US, "focus: %.0f", quality.sharpness),
-            quality.sharpness >= 55.0,
+            quality.sharpness >= scannerConfig.minSharpnessVariance,
             checks.sharpness
         ));
         boolean exposureOk = quality.brightness >= 36f
@@ -585,11 +585,10 @@ final class ScannerOverlayView extends View {
     }
 
     private RectF guideRect() {
-        float horizontalMargin = dp(20f);
-        float maximumWidth = Math.max(1f, getWidth() - horizontalMargin * 2f);
-        float width = maximumWidth;
+        boolean landscape = getWidth() > getHeight();
+        float width = Math.max(1f, getWidth() * (landscape ? 0.72f : 0.80f));
         float height = width / ScannerConfig.DEFAULT.expectedDocumentAspect;
-        float maximumHeight = getHeight() * (getWidth() > getHeight() ? 0.80f : 0.46f);
+        float maximumHeight = getHeight() * (landscape ? 0.72f : 0.44f);
         if (height > maximumHeight) {
             height = maximumHeight;
             width = height * ScannerConfig.DEFAULT.expectedDocumentAspect;
@@ -601,17 +600,15 @@ final class ScannerOverlayView extends View {
 
     private int colorFor(AnalysisResult.State state) {
         switch (state) {
-            case HOLD_STILL:
-            case WAITING_FOR_FOCUS:
             case READY:
+            case FOCUSING:
             case CAPTURING:
             case PROCESSING:
             case SUCCESS:
                 return 0xff4ade80;
             case SEARCHING:
             case RETRYING:
-                return 0xffef4444;
-            case FOCUSING:
+                return 0xffa3a3a3;
             default:
                 return 0xfffacc15;
         }
