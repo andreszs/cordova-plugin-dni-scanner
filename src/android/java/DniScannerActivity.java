@@ -369,15 +369,17 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             root.addView(topBar, topParams);
         }
 
-        captureButton = controlButton("Capturar");
-        captureButton.setOnClickListener(view -> beginCapture(true));
-        FrameLayout.LayoutParams captureParams = new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            dp(48),
-            Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL
-        );
-        captureParams.bottomMargin = dp(18);
-        root.addView(captureButton, captureParams);
+        if (!autoCapture) {
+            captureButton = controlButton("Capturar");
+            captureButton.setOnClickListener(view -> beginCapture(true));
+            FrameLayout.LayoutParams captureParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                dp(48),
+                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL
+            );
+            captureParams.bottomMargin = dp(18);
+            root.addView(captureButton, captureParams);
+        }
 
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             view.setPadding(

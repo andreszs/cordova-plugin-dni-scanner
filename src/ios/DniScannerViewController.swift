@@ -217,15 +217,17 @@ final class DNIViewController: UIViewController {
                 button.heightAnchor.constraint(equalToConstant: 44)
             ])
         }
-        let capture = makeButton(title: "Capturar")
-        capture.addTarget(self, action: #selector(captureManually), for: .touchUpInside)
-        view.addSubview(capture)
-        captureButton = capture
-        NSLayoutConstraint.activate([
-            capture.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            capture.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
-            capture.heightAnchor.constraint(equalToConstant: 44)
-        ])
+        if !options.autoCapture {
+            let capture = makeButton(title: "Capturar")
+            capture.addTarget(self, action: #selector(captureManually), for: .touchUpInside)
+            view.addSubview(capture)
+            captureButton = capture
+            NSLayoutConstraint.activate([
+                capture.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                capture.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+                capture.heightAnchor.constraint(equalToConstant: 44)
+            ])
+        }
     }
 
     private func makeButton(title: String) -> UIButton {

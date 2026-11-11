@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.3.3 - 2026-11-11
+
+- Changed Android and iOS so `autoCapture: true` uses automatic capture without creating the native **Capturar** button, while `autoCapture: false` shows the button and preserves the existing manual capture flow.
+
 ## 0.3.2 - 2026-11-10
 
 - Recalibrated Android and iOS for an OCR-friendly default policy: 4° capture roll, moderate 12° perspective, 0.10–0.92 area, relaxed centering, and tracking/UI hysteresis that cannot authorize the shutter.
