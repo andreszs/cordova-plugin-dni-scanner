@@ -1012,6 +1012,7 @@ extension DNIViewController: AVCapturePhotoCaptureDelegate {
                 self.fail(.captureFailed("La cámara no devolvió la fotografía capturada.", true))
                 return
             }
+            self.capturedPreviewAnalysis = self.latestAnalysisSnapshot().analysis
             self.stateLock.lock()
             self.analysisSuspended = true
             self.stateLock.unlock()

@@ -34,9 +34,9 @@ assert(iosTracker.includes('state == .ready && !geometryIsAccepted'));
 assert(iosTracker.includes('useExit: false'));
 
 // perspective=false is honored while convex four-corner detection remains mandatory.
-assert(androidActivity.includes('source.optBoolean("perspective", true)'));
+assert(androidActivity.includes('source.optBoolean("perspective", false)'));
 assert(androidEngine.includes('if (checks.perspective)'));
-assert(iosTypes.includes('perspective = bool("perspective", true)'));
+assert(iosTypes.includes('perspective = bool("perspective", false)'));
 assert(iosEngine.includes('if checks.perspective'));
 
 // Visual stability is short; inertial sensors never veto a started or manual capture.
@@ -49,7 +49,7 @@ assert(iosEngine.includes('requiredStableFrames = 2'));
 assert(!iosController.includes('motionMonitor.captureMayProceed()'));
 assert(iosController.includes('beginCapture(analysis, manual: true)'));
 
-// Detection and crop policies tolerate preview misses while preserving a hard border margin.
+// Detection remains strict in preview, but the stable preview track is authoritative after shutter.
 assert(androidModels.includes('final class DocumentShapeGate'));
 assert(androidModels.includes('MAXIMUM_CORNER_DEVIATION_DEGREES = 18f'));
 assert(androidEngine.includes('DocumentShapeGate.accepts(quad, width, height)'));
@@ -65,17 +65,19 @@ assert(iosTypes.includes('enum DNIDocumentShapeGate'));
 assert(iosEngine.includes('DNIDocumentShapeGate.accepts'));
 assert(iosTracker.includes('forceGlobalDetection'));
 assert(iosTracker.includes('timestamp - adjustPerspectiveSince >= 0.65'));
-assert(androidConfig.includes('MINIMUM_CROP_PADDING_PERCENT = 1.75f'));
-assert(androidCrop.includes('minimumCropIntegrityClearanceFraction'));
+assert(!androidConfig.includes('MINIMUM_CROP_PADDING_PERCENT'));
+assert(!androidCrop.includes('minimumCropIntegrityClearanceFraction'));
 assert(androidCrop.includes('reducedPadding'));
-assert(!androidStill.includes('fallback=preview_prior reason=no_still_detection'));
-assert(!androidStill.includes('fallback=preview_prior reason=divergent_still_detection'));
-assert(androidStill.includes('physical_border_unconfirmed'));
-assert(androidCrop.includes('hasCompletePhysicalBorder'));
-assert(iosEngine.includes('minimumAdaptivePaddingFraction: CGFloat = 0.0175'));
-assert(!iosEngine.includes('source: "preview_fallback"'));
-assert(!iosEngine.includes('source: "preview_guard"'));
-assert(iosEngine.includes('hasCompletePhysicalBorder'));
+assert(androidStill.includes('detectionForQuad(prior, 0.80f'));
+assert(androidStill.includes('source=still_refinement'));
+assert(!androidEngine.includes('confirmedStillPrior'));
+assert(!androidStill.includes('TrackMatch'));
+assert(!androidStill.includes('physical_border_unconfirmed'));
+assert(!androidCrop.includes('hasCompletePhysicalBorder'));
+assert(!iosEngine.includes('minimumAdaptivePaddingFraction'));
+assert(iosEngine.includes('source: "preview_track"'));
+assert(!iosEngine.includes('TrackMatch'));
+assert(!iosEngine.includes('hasCompletePhysicalBorder'));
 assert(iosPlugin.includes('warnings.append("reduced_padding")'));
 
 console.log('OCR-friendly capture policy checks passed.');

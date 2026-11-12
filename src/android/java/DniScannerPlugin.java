@@ -207,7 +207,6 @@ public final class DniScannerPlugin extends CordovaPlugin {
             case "brightness":
             case "glare":
             case "shadows":
-            case "edgeOcclusion":
                 return true;
             default:
                 return false;

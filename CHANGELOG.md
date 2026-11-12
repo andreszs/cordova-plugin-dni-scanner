@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.4.1 - 2026-11-12
+
+- Made the stable preview track authoritative for still-photo cropping. A valid capture is no longer rejected because the JPEG detector cannot rebuild the same closed contour or returns a slightly different quadrilateral; compatible still detection remains an optional refinement.
+- Removed duplicated still-detection, preview/still-divergence, exterior-border-contrast, minimum-background-padding, margin, and pre-crop quality gates from the Android and iOS pipelines. A complete document remains mandatory, available padding is retained per side, and reduced padding is reported instead of causing another capture.
+- Consolidated final quality validation into the shared policy, aligned the default sharpness threshold at 55 on Android and iOS, and kept document size, centering, perspective, stability, glare, and shadows advisory unless explicitly enabled.
+- Removed the post-READY AF/AE wait on Android while retaining preventive document-centered focus and exposure metering during tracking.
+- Improved tracker responsiveness by allowing fresh detections to update the visible quadrilateral immediately while preserving temporal confirmation for automatic capture.
+- Removed the inactive `checks.edgeOcclusion` option and its Android/iOS diagnostics. Complete-document geometry remains part of detection without a color-based occlusion control.
+
 ## 0.3.3 - 2026-11-11
 
 - Changed Android and iOS so `autoCapture: true` uses automatic capture without creating the native **Capturar** button, while `autoCapture: false` shows the button and preserves the existing manual capture flow.

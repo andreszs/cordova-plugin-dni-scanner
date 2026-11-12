@@ -278,12 +278,6 @@ final class DNIOverlayView: UIView {
                 DebugRow(text: "light: -", acceptable: false, enabled: checks.brightness),
                 DebugRow(text: "glare: -", acceptable: false, enabled: checks.glare),
                 DebugRow(text: "shadow: -", acceptable: false, enabled: checks.shadows),
-                DebugRow(text: "edge: -", acceptable: false, enabled: checks.edgeOcclusion),
-                DebugRow(
-                    text: "skin: -",
-                    acceptable: false,
-                    enabled: checks.edgeOcclusion && profile == .dni
-                ),
                 DebugRow(text: "hold: -", acceptable: false, enabled: true)
             ])
             rows.append(motionRow(analysis?.motion))
@@ -296,10 +290,6 @@ final class DNIOverlayView: UIView {
         let shadowAcceptable = quality.illuminationSpread
                 <= DNIEngine.maximumIlluminationSpread(for: profile)
             || quality.shadowBoundary <= DNIEngine.maximumShadowBoundary(for: profile)
-        let borderAcceptable = quality.edgeGap <= DNIEngine.maximumEdgeObstruction
-            && (profile == .genericCard
-                || quality.edgeObstruction <= DNIEngine.maximumEdgeObstruction)
-        let skinAcceptable = quality.skinEdgeObstruction <= DNIEngine.maximumEdgeObstruction
         let visuallyStable = current.stableFrameCount >= DNIEngine.requiredStableFrames
             && current.stableDurationMs >= DNIEngine.requiredStableDurationMs
 
@@ -363,20 +353,6 @@ final class DNIOverlayView: UIView {
                 ),
                 acceptable: shadowAcceptable,
                 enabled: checks.shadows
-            ),
-            DebugRow(
-                text: String(
-                    format: "edge: %.2f warm %.2f",
-                    quality.edgeGap,
-                    quality.edgeObstruction
-                ),
-                acceptable: borderAcceptable,
-                enabled: checks.edgeOcclusion
-            ),
-            DebugRow(
-                text: String(format: "skin: %.3f", quality.skinEdgeObstruction),
-                acceptable: profile == .genericCard || skinAcceptable,
-                enabled: checks.edgeOcclusion && profile == .dni
             ),
             DebugRow(
                 text: String(

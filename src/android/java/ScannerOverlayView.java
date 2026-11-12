@@ -220,9 +220,6 @@ final class ScannerOverlayView extends View {
             rows.add(new DebugRow("light: -", false, checks.brightness));
             rows.add(new DebugRow("glare: -", false, checks.glare));
             rows.add(new DebugRow("shadow: -", false, checks.shadows));
-            rows.add(new DebugRow("edge: -", false, checks.edgeOcclusion));
-            rows.add(new DebugRow("skin: -", false,
-                checks.edgeOcclusion && scannerConfig.profile == ScanProfile.DNI));
             rows.add(new DebugRow("hold: -", false, true));
             rows.add(new DebugRow("valid: -", false, true));
             rows.add(motionRow(result == null ? null : result.motion));
@@ -261,7 +258,7 @@ final class ScannerOverlayView extends View {
         ));
         rows.add(new DebugRow(
             String.format(Locale.US, "focus: %.0f", quality.sharpness),
-            quality.sharpness >= scannerConfig.minSharpnessVariance,
+            quality.sharpness >= scannerConfig.minStillSharpnessVariance,
             checks.sharpness
         ));
         boolean exposureOk = quality.brightness >= 36f
@@ -286,18 +283,6 @@ final class ScannerOverlayView extends View {
             !(quality.illuminationSpread > 0.46f
                 && quality.shadowBoundary > 0.28f),
             checks.shadows
-        ));
-        boolean genericCard = scannerConfig.profile == ScanProfile.GENERIC_CARD;
-        rows.add(new DebugRow(
-            String.format(Locale.US, "edge: %.2f warm %.2f", quality.edgeGapFraction,
-                quality.warmEdgeRunFraction),
-            true,
-            checks.edgeOcclusion
-        ));
-        rows.add(new DebugRow(
-            String.format(Locale.US, "skin: %.3f", quality.skinEdgeRunFraction),
-            true,
-            checks.edgeOcclusion && !genericCard
         ));
         int requiredFrames = checks.stability
             ? scannerConfig.stableFrames

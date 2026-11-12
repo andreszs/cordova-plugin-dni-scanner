@@ -33,25 +33,23 @@ struct DNIChecks {
     let brightness: Bool
     let glare: Bool
     let shadows: Bool
-    let edgeOcclusion: Bool
 
     static let defaults = DNIChecks(
-        documentSize: true,
+        documentSize: false,
         centering: false,
-        perspective: true,
+        perspective: false,
         stability: false,
         sharpness: true,
         brightness: true,
         glare: false,
-        shadows: false,
-        edgeOcclusion: false
+        shadows: false
     )
 
     init(dictionary: [String: Any]?) throws {
         let source = dictionary ?? [:]
         let known = Set([
             "documentSize", "centering", "perspective", "stability", "sharpness",
-            "brightness", "glare", "shadows", "edgeOcclusion"
+            "brightness", "glare", "shadows"
         ])
         for (name, value) in source {
             guard known.contains(name) else {
@@ -65,15 +63,14 @@ struct DNIChecks {
         func bool(_ name: String, _ fallback: Bool) -> Bool {
             return source[name] as? Bool ?? fallback
         }
-        documentSize = bool("documentSize", true)
+        documentSize = bool("documentSize", false)
         centering = bool("centering", false)
-        perspective = bool("perspective", true)
+        perspective = bool("perspective", false)
         stability = bool("stability", false)
         sharpness = bool("sharpness", true)
         brightness = bool("brightness", true)
         glare = bool("glare", false)
         shadows = bool("shadows", false)
-        edgeOcclusion = bool("edgeOcclusion", false)
     }
 
     private init(
@@ -84,8 +81,7 @@ struct DNIChecks {
         sharpness: Bool,
         brightness: Bool,
         glare: Bool,
-        shadows: Bool,
-        edgeOcclusion: Bool
+        shadows: Bool
     ) {
         self.documentSize = documentSize
         self.centering = centering
@@ -95,7 +91,6 @@ struct DNIChecks {
         self.brightness = brightness
         self.glare = glare
         self.shadows = shadows
-        self.edgeOcclusion = edgeOcclusion
     }
 
     var dictionary: [String: Any] {
@@ -107,8 +102,7 @@ struct DNIChecks {
             "sharpness": sharpness,
             "brightness": brightness,
             "glare": glare,
-            "shadows": shadows,
-            "edgeOcclusion": edgeOcclusion
+            "shadows": shadows
         ]
     }
 }
@@ -134,7 +128,7 @@ struct DNIOptions {
     static let defaultMinimumEffectiveDocumentLongEdge = 0
     static let maximumEffectiveDocumentLongEdge = 4096
     static let minimumStillSharpnessVariance = 1.0
-    static let defaultMinimumStillSharpnessVariance = 70.0
+    static let defaultMinimumStillSharpnessVariance = 55.0
     static let maximumStillSharpnessVariance = 10_000.0
 
     let profile: DNIScanProfile

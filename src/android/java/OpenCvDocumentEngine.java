@@ -602,23 +602,23 @@ final class OpenCvDocumentEngine {
                 return AnalysisResult.State.ADJUST_PERSPECTIVE;
             }
         }
-        if (checks.sharpness && quality.sharpness < config.minSharpnessVariance) {
+        if (checks.sharpness && quality.sharpness < config.minStillSharpnessVariance) {
             return AnalysisResult.State.WAITING_FOR_FOCUS;
         }
-        if (checks.brightness && (quality.brightness < 36f || quality.darkFraction > 0.45f)) {
+        if (checks.brightness && (quality.brightness < 34f || quality.darkFraction > 0.48f)) {
             return AnalysisResult.State.IMPROVE_LIGHTING;
         }
         // White DNI stock is not overexposure. Require both substantial sensor
         // clipping and a connected specular region before blocking capture.
-        if (checks.brightness && quality.clippedFraction > 0.42f
-            && quality.glareBlobFraction > 0.10f) {
+        if (checks.brightness && quality.clippedFraction > 0.48f
+            && quality.glareBlobFraction > 0.12f) {
             return AnalysisResult.State.REDUCE_LIGHTING;
         }
-        if (checks.glare && quality.glareBlobFraction > 0.13f) {
+        if (checks.glare && quality.glareBlobFraction > 0.14f) {
             return AnalysisResult.State.AVOID_GLARE;
         }
-        if (checks.shadows && quality.illuminationSpread > 0.46f
-            && quality.shadowBoundary > 0.28f) {
+        if (checks.shadows && quality.illuminationSpread > 0.52f
+            && quality.shadowBoundary > 0.30f) {
             return AnalysisResult.State.UNEVEN_LIGHTING;
         }
         return AnalysisResult.State.READY;

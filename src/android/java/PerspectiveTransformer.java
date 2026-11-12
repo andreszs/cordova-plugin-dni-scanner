@@ -99,102 +99,12 @@ final class PerspectiveTransformer {
         )));
     }
 
-    boolean hasSufficientSourceMargin(DocumentQuad quad, int sourceWidth, int sourceHeight) {
-        return adaptiveCropPlan(quad, sourceWidth, sourceHeight) != null;
-    }
-
     boolean usesReducedPadding(DocumentQuad quad, int sourceWidth, int sourceHeight) {
         CropPlan plan = adaptiveCropPlan(quad, sourceWidth, sourceHeight);
         return plan != null && plan.reducedPadding;
     }
 
-    /** Confirms that every detected side separates card pixels from exterior pixels. */
-    boolean hasCompletePhysicalBorder(LumaFrame frame, DocumentQuad quad) {
-        if (frame == null || quad == null) {
-            return false;
-        }
-        float averageHeight = (quad.leftHeight() + quad.rightHeight()) * 0.5f;
-        float aspect = (quad.topWidth() + quad.bottomWidth()) * 0.5f
-            / Math.max(1f, averageHeight);
-        if (aspect < ScannerConfig.MINIMUM_STILL_DOCUMENT_ASPECT
-            || aspect > ScannerConfig.MAXIMUM_STILL_DOCUMENT_ASPECT) {
-            return false;
-        }
-        float offset = Math.max(3f, Math.min(7f, averageHeight * 0.018f));
-        PointF[] points = {
-            quad.topLeft, quad.topRight, quad.bottomRight, quad.bottomLeft
-        };
-        for (int side = 0; side < 4; side++) {
-            if (!sideSeparatesFromExterior(
-                    frame, points[side], points[(side + 1) % 4], offset)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private boolean sideSeparatesFromExterior(LumaFrame frame, PointF first,
-                                               PointF second, float offset) {
-        float dx = second.x - first.x;
-        float dy = second.y - first.y;
-        float length = (float) Math.hypot(dx, dy);
-        if (length < 2f) {
-            return false;
-        }
-        float outwardX = dy / length;
-        float outwardY = -dx / length;
-        int compared = 0;
-        int separated = 0;
-        float totalSeparation = 0f;
-        for (int sample = 0; sample < 32; sample++) {
-            float t = 0.08f + 0.84f * (sample + 0.5f) / 32f;
-            float x = first.x + dx * t;
-            float y = first.y + dy * t;
-            int insideX = Math.round(x - outwardX * offset);
-            int insideY = Math.round(y - outwardY * offset);
-            int outsideX = Math.round(x + outwardX * offset);
-            int outsideY = Math.round(y + outwardY * offset);
-            if (!inside(frame, insideX, insideY) || !inside(frame, outsideX, outsideY)) {
-                continue;
-            }
-            float difference = Math.abs(
-                frame.unsignedAt(insideX, insideY) - frame.unsignedAt(outsideX, outsideY)
-            );
-            int insideColor = frame.colorfulnessAt(insideX, insideY);
-            int outsideColor = frame.colorfulnessAt(outsideX, outsideY);
-            if (insideColor >= 0 && outsideColor >= 0) {
-                difference = Math.max(
-                    difference, Math.abs(insideColor - outsideColor) * 0.5f
-                );
-            }
-            int insideWarmth = frame.warmthAt(insideX, insideY);
-            int outsideWarmth = frame.warmthAt(outsideX, outsideY);
-            if (insideWarmth >= 0 && outsideWarmth >= 0) {
-                difference = Math.max(
-                    difference, Math.abs(insideWarmth - outsideWarmth) * 0.35f
-                );
-            }
-            compared++;
-            totalSeparation += difference;
-            if (difference >= 8f) {
-                separated++;
-            }
-        }
-        return compared >= 24
-            && (totalSeparation / compared >= ScannerConfig.MINIMUM_PHYSICAL_BORDER_SEPARATION
-                || separated / (float) compared
-                    >= ScannerConfig.MINIMUM_SEPARATED_BORDER_FRACTION);
-    }
-
-    private static boolean inside(LumaFrame frame, int x, int y) {
-        return x >= 0 && x < frame.width && y >= 0 && y < frame.height;
-    }
-
-    /**
-     * Keeps the complete detected quadrilateral and chooses the available padding
-     * independently on every output side. The 1.75% clearance is a hard proof
-     * that the physical edge is present; the 6% padding remains only a target.
-     */
+    /** Keeps the complete quadrilateral and uses whatever optional padding is available. */
     private CropPlan adaptiveCropPlan(DocumentQuad quad, int sourceWidth, int sourceHeight) {
         if (quad == null || sourceWidth < 2 || sourceHeight < 2) {
             return null;
@@ -208,17 +118,10 @@ final class PerspectiveTransformer {
         if (averageWidth < 1f || averageHeight < 1f) {
             return null;
         }
-        float guard = Math.max(0f, config.cropIntegrityGuardPixels);
-        float minimumXPadding = averageWidth * config.minimumCropIntegrityClearanceFraction;
-        float minimumYPadding = averageHeight * config.minimumCropIntegrityClearanceFraction;
-        float availableLeft = minX - guard;
-        float availableRight = sourceWidth - 1f - guard - maxX;
-        float availableTop = minY - guard;
-        float availableBottom = sourceHeight - 1f - guard - maxY;
-        if (availableLeft < minimumXPadding || availableRight < minimumXPadding
-            || availableTop < minimumYPadding || availableBottom < minimumYPadding) {
-            return null;
-        }
+        float availableLeft = Math.max(0f, minX);
+        float availableRight = Math.max(0f, sourceWidth - 1f - maxX);
+        float availableTop = Math.max(0f, minY);
+        float availableBottom = Math.max(0f, sourceHeight - 1f - maxY);
 
         float desiredXPadding = averageWidth * config.cropPaddingFraction;
         float desiredYPadding = averageHeight * config.cropPaddingFraction;

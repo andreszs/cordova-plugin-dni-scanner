@@ -12,17 +12,14 @@ final class ScannerConfig {
     static final int DEFAULT_MIN_EFFECTIVE_DOCUMENT_LONG_EDGE = 0;
     static final int MAX_EFFECTIVE_DOCUMENT_LONG_EDGE = 4096;
     static final double MIN_STILL_SHARPNESS_VARIANCE = 1.0;
-    static final double DEFAULT_MIN_STILL_SHARPNESS_VARIANCE = 90.0;
+    static final double DEFAULT_MIN_STILL_SHARPNESS_VARIANCE = 55.0;
     static final double MAX_STILL_SHARPNESS_VARIANCE = 10000.0;
     static final float GUIDE_MARGIN_PERCENT = 10f;
     static final float CROP_PADDING_PERCENT = 6f;
-    static final float MINIMUM_CROP_PADDING_PERCENT = 1.75f;
     static final float MINIMUM_DOCUMENT_AREA = 0.10f;
     static final float MAXIMUM_DOCUMENT_AREA = 0.92f;
     static final float MINIMUM_STILL_DOCUMENT_ASPECT = 1.35f;
     static final float MAXIMUM_STILL_DOCUMENT_ASPECT = 1.95f;
-    static final float MINIMUM_PHYSICAL_BORDER_SEPARATION = 5f;
-    static final float MINIMUM_SEPARATED_BORDER_FRACTION = 0.32f;
     static final float MAXIMUM_CENTER_OFFSET = 0.43f;
     static final float MAX_RECTANGLE_DEVIATION_DEGREES = 3f;
     static final float MAX_SYMMETRIC_PERSPECTIVE_DEVIATION_DEGREES = 12f;
@@ -53,8 +50,6 @@ final class ScannerConfig {
     final float expectedDocumentAspect = 85.60f / 53.98f;
     final float guideMarginFraction = GUIDE_MARGIN_PERCENT / 100f;
     final float cropPaddingFraction = CROP_PADDING_PERCENT / 100f;
-    final float minimumCropIntegrityClearanceFraction = MINIMUM_CROP_PADDING_PERCENT / 100f;
-    final float cropIntegrityGuardPixels = 1f;
 
     final int stableFrames = 2;
     final long stableDurationMs = 220L;
@@ -74,10 +69,8 @@ final class ScannerConfig {
     final long instructionStateConfirmationMs = 650L;
     final long instructionLossGraceMs = 500L;
     final long captureDelayMs = 65L;
-    final long focusMeteringTimeoutMs = 425L;
-    final long retryMessageDurationMs = 1000L;
+    final long retryMessageDurationMs = 300L;
 
-    final double minSharpnessVariance = 38.0;
     final int jpegQuality = 95;
     final int recognitionWidth = 256;
     final int recognitionHeight = 160;

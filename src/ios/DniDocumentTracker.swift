@@ -112,7 +112,7 @@ final class DNIDocumentTracker {
             at: timestamp
         )
         let smooth = smoothedQuad.map {
-            engine.blend($0, rawQuad, currentWeight: 0.58)
+            engine.blend($0, rawQuad, currentWeight: 0.72)
         } ?? rawQuad
         smoothedQuad = smooth
         previousRawQuad = rawQuad

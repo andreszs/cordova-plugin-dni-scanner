@@ -22,8 +22,8 @@ public final class PerspectiveTransformerHostTest {
         if (ScannerConfig.DEFAULT.minEffectiveDocumentLongEdge != 0) {
             throw new AssertionError("Effective document resolution must be opt-in by default");
         }
-        if (ScannerConfig.DEFAULT.minStillSharpnessVariance != 90.0) {
-            throw new AssertionError("The OCR-friendly Android sharpness default must be 90");
+        if (ScannerConfig.DEFAULT.minStillSharpnessVariance != 55.0) {
+            throw new AssertionError("The OCR-friendly Android sharpness default must be 55");
         }
         if (Math.abs(
                 ScannerConfig.DEFAULT.cropPaddingFraction
@@ -60,9 +60,6 @@ public final class PerspectiveTransformerHostTest {
             new PointF(175f, 610f)
         );
         PerspectiveTransformer transformer = new PerspectiveTransformer(ScannerConfig.DEFAULT);
-        if (!transformer.hasSufficientSourceMargin(quad, width, height)) {
-            throw new AssertionError("A well-contained document must pass crop-integrity validation");
-        }
         Bitmap corrected = transformer.cropWithoutWarp(new Bitmap(source), quad);
         float aspect = corrected.getWidth() / (float) corrected.getHeight();
         System.out.printf("CROPPED width=%d height=%d aspect=%.4f%n",
@@ -120,14 +117,8 @@ public final class PerspectiveTransformerHostTest {
             new PointF(900f, 503f),
             new PointF(100f, 503f)
         );
-        if (transformer.hasSufficientSourceMargin(clippedTop, 1000, 700)) {
-            throw new AssertionError("A document too close to the source boundary must be retried");
-        }
-        try {
-            transformer.cropWithoutWarp(new Bitmap(source), clippedTop);
-            throw new AssertionError("Crop must not silently clamp incomplete padding");
-        } catch (IllegalArgumentException expected) {
-            // Expected: the scanner must retry instead of returning a clipped DNI.
+        if (!transformer.usesReducedPadding(clippedTop, 1000, 700)) {
+            throw new AssertionError("Available boundary padding must be reduced, not rejected");
         }
 
         DocumentQuad completeNearBoundary = new DocumentQuad(
@@ -136,28 +127,8 @@ public final class PerspectiveTransformerHostTest {
             new PointF(975f, 580f),
             new PointF(25f, 580f)
         );
-        if (!transformer.hasSufficientSourceMargin(completeNearBoundary, 1000, 700)) {
-            throw new AssertionError(
-                "A complete document with the minimum physical margin was rejected"
-            );
-        }
         if (!transformer.usesReducedPadding(completeNearBoundary, 1000, 700)) {
             throw new AssertionError("Reduced desired padding must be reported");
-        }
-
-        DocumentQuad borderQuad = new DocumentQuad(
-            new PointF(30f, 25f),
-            new PointF(170f, 25f),
-            new PointF(170f, 115f),
-            new PointF(30f, 115f)
-        );
-        LumaFrame completeBorder = syntheticCardFrame(false);
-        if (!transformer.hasCompletePhysicalBorder(completeBorder, borderQuad)) {
-            throw new AssertionError("Four real exterior borders must be accepted");
-        }
-        LumaFrame missingTopBorder = syntheticCardFrame(true);
-        if (transformer.hasCompletePhysicalBorder(missingTopBorder, borderQuad)) {
-            throw new AssertionError("An internal line must not substitute the top border");
         }
 
         ScannerConfig compactConfig = ScannerConfig.withMaxOutputLongEdge(768);
@@ -219,20 +190,6 @@ public final class PerspectiveTransformerHostTest {
             }
         }
         return -1;
-    }
-
-    private static LumaFrame syntheticCardFrame(boolean cardContinuesAboveQuad) {
-        int width = 200;
-        int height = 140;
-        byte[] luma = new byte[width * height];
-        java.util.Arrays.fill(luma, (byte) 30);
-        int top = cardContinuesAboveQuad ? 0 : 25;
-        for (int y = top; y <= 115; y++) {
-            for (int x = 30; x <= 170; x++) {
-                luma[y * width + x] = (byte) 200;
-            }
-        }
-        return new LumaFrame(width, height, luma);
     }
 
     private static void assertInvalidMaximum(int value) {

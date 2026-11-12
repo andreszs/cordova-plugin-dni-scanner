@@ -33,7 +33,6 @@ final class TemporalDocumentTracker implements AutoCloseable {
     private final ScannerConfig config;
     private final ScanChecks checks;
     private final OpenCvDocumentEngine engine;
-    private final PerspectiveTransformer cropGeometry;
 
     private Mat previousGray;
     private DocumentQuad previousRaw;
@@ -52,7 +51,6 @@ final class TemporalDocumentTracker implements AutoCloseable {
         this.config = config;
         this.checks = checks;
         this.engine = new OpenCvDocumentEngine(config, detectionRegion);
-        this.cropGeometry = new PerspectiveTransformer(config);
     }
 
     synchronized AnalysisResult update(LumaFrame frame, long nowMs) {
@@ -90,7 +88,7 @@ final class TemporalDocumentTracker implements AutoCloseable {
 
             DocumentQuad raw = candidate.quad;
             DocumentQuad nextSmoothed = smoothed == null
-                ? raw : OpenCvDocumentEngine.blend(smoothed, raw, 0.42f);
+                ? raw : OpenCvDocumentEngine.blend(smoothed, raw, 0.72f);
             boolean stableGeometry = updateStability(
                 nextSmoothed, frame.width, frame.height, nowMs
             );
@@ -99,15 +97,9 @@ final class TemporalDocumentTracker implements AutoCloseable {
             lastDetection = candidate;
 
             QualityMetrics quality = engine.assess(current, candidate.quad);
-            boolean cropComplete = cropGeometry.hasSufficientSourceMargin(
-                candidate.quad, frame.width, frame.height
-            );
             AnalysisResult.State state = engine.classify(
                 candidate, quality, checks, geometryAccepted
             );
-            if (state == AnalysisResult.State.READY && !cropComplete) {
-                state = AnalysisResult.State.CROP_INCOMPLETE;
-            }
 
             boolean trackingGeometryValid = (!checks.documentSize
                 || (candidate.areaFraction >= ScannerConfig.MINIMUM_DOCUMENT_AREA
@@ -129,8 +121,7 @@ final class TemporalDocumentTracker implements AutoCloseable {
                         geometryAccepted
                             ? ScannerConfig.EXIT_TRAPEZOID_SYMMETRY_ERROR_DEGREES
                             : ScannerConfig.MAX_TRAPEZOID_SYMMETRY_ERROR_DEGREES
-                    )))
-                && cropComplete;
+                    )));
             geometryAccepted = trackingGeometryValid;
             boolean geometryValid = (!checks.documentSize
                 || (candidate.areaFraction >= ScannerConfig.MINIMUM_DOCUMENT_AREA
@@ -144,8 +135,7 @@ final class TemporalDocumentTracker implements AutoCloseable {
                         ScannerConfig.MAX_RECTANGLE_DEVIATION_DEGREES,
                         ScannerConfig.MAX_SYMMETRIC_PERSPECTIVE_DEVIATION_DEGREES,
                         ScannerConfig.MAX_TRAPEZOID_SYMMETRY_ERROR_DEGREES
-                    )))
-                && cropComplete;
+                    )));
             // Exit thresholds keep an already acquired track calm, but must never
             // authorize the shutter. The current frame has to meet entry geometry.
             if (state == AnalysisResult.State.READY && !geometryValid) {

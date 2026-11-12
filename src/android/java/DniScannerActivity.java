@@ -113,16 +113,13 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     private DisplayManager displayManager;
     private boolean displayListenerRegistered;
     private Runnable timeoutRunnable;
-    private AnalysisResult latestAnalysis;
-    private int latestFrameWidth;
-    private int latestFrameHeight;
+    private volatile AnalysisResult latestAnalysis;
+    private volatile int latestFrameWidth;
+    private volatile int latestFrameHeight;
     private long captureMotionSequence;
     private MotionSnapshot capturedMotion;
     private String capturedOrientation;
     private DniScannerSuccessBeep successBeep;
-    private int focusMeteringSequence;
-    private boolean focusMeteringPending;
-    private boolean manualCaptureRequested;
     private DocumentQuad captureReferenceQuad;
     private DocumentQuad capturedPreviewQuad;
     private int capturedPreviewWidth;
@@ -808,7 +805,6 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         MotionSnapshot motion = motionSnapshot();
         lockAutoOrientationForCapture();
         capturing = true;
-        manualCaptureRequested = manual;
         captureReferenceQuad = latestAnalysis == null || latestAnalysis.detection == null
             ? null : latestAnalysis.detection.quad;
         trace("capture:begin manual=" + manual
@@ -821,60 +817,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         if (captureButton != null) {
             captureButton.setEnabled(false);
         }
-        showCaptureStage(AnalysisResult.State.FOCUSING, "Enfocando…", motion);
-        mainHandler.postDelayed(this::focusAndCaptureStillImage, config.captureDelayMs);
-    }
-
-    private void focusAndCaptureStillImage() {
-        if (completed || !capturing || imageCapture == null) {
-            return;
-        }
-        final int sequence = ++focusMeteringSequence;
-        trace("capture:focus_start sequence=" + sequence
-            + " freshGeometry=" + hasFreshCaptureGeometry());
-        focusMeteringPending = true;
-        mainHandler.postDelayed(
-            () -> completeFocusMetering(sequence),
-            config.focusMeteringTimeoutMs
-        );
-
-        if (camera == null || latestAnalysis == null || latestAnalysis.detection == null
-            || latestFrameWidth <= 0 || latestFrameHeight <= 0
-            || previewView.getWidth() <= 0 || previewView.getHeight() <= 0) {
-            return;
-        }
-        MeteringPoint point = meteringPoint(latestAnalysis, latestFrameWidth, latestFrameHeight);
-        FocusMeteringAction action = new FocusMeteringAction.Builder(
-            point,
-            FocusMeteringAction.FLAG_AF | FocusMeteringAction.FLAG_AE
-        ).setAutoCancelDuration(2, TimeUnit.SECONDS).build();
-        try {
-            ListenableFuture<FocusMeteringResult> focus = camera.getCameraControl()
-                .startFocusAndMetering(action);
-            focus.addListener(() -> {
-                try {
-                    if (focus.get().isFocusSuccessful()) {
-                        trace("capture:focus_success sequence=" + sequence);
-                        completeFocusMetering(sequence);
-                    }
-                } catch (Exception ignored) {
-                    // The bounded timeout below is the fallback for unsupported or failed AF/AE.
-                }
-            }, ContextCompat.getMainExecutor(this));
-        } catch (Exception ignored) {
-            // The bounded timeout below is the fallback for unsupported or failed AF/AE.
-        }
-    }
-
-    private void completeFocusMetering(int sequence) {
-        if (!focusMeteringPending || sequence != focusMeteringSequence
-            || completed || !capturing) {
-            return;
-        }
-        focusMeteringPending = false;
-        trace("capture:focus_complete sequence=" + sequence
-            + " freshGeometry=" + hasFreshCaptureGeometry());
-        captureStillImage();
+        mainHandler.postDelayed(this::captureStillImage, config.captureDelayMs);
     }
 
     private void captureStillImage() {
@@ -908,6 +851,13 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
                 @Override
                 public void onImageSaved(@NonNull ImageCapture.OutputFileResults outputFileResults) {
                     trace("capture:image_saved bytes=" + rawFile.length());
+                    AnalysisResult current = latestAnalysis;
+                    if (current != null && current.detection != null) {
+                        capturedPreviewQuad = current.detection.quad;
+                        capturedPreviewWidth = latestFrameWidth;
+                        capturedPreviewHeight = latestFrameHeight;
+                        trace("capture:final_preview detection=" + detectionText(current.detection));
+                    }
                     // Keep the preview/session alive while post-processing, but
                     // stop redundant frame analysis once the shutter result exists.
                     if (frameAnalyzer != null) {
@@ -1087,7 +1037,6 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
                 return;
             }
             capturing = false;
-            manualCaptureRequested = false;
             captureReferenceQuad = null;
             if (captureButton != null) {
                 captureButton.setEnabled(true);
@@ -1095,8 +1044,6 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             if (instructionStateStabilizer != null) {
                 instructionStateStabilizer.force(AnalysisResult.State.RETRYING);
             }
-            focusMeteringPending = false;
-            focusMeteringSequence++;
             unlockAutoOrientationAfterRetry();
             previewView.post(() -> synchronizeCameraRotation("capture_retry", false));
             AnalysisResult retryResult = diagnostic != null
@@ -1168,25 +1115,6 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
             motion.linearAcceleration, motion.quietDurationMs,
             motion.motionSequence
         );
-    }
-
-    private boolean hasFreshCaptureGeometry() {
-        AnalysisResult current = latestAnalysis;
-        if (current == null || current.detection == null || captureReferenceQuad == null
-            || latestFrameWidth <= 0 || latestFrameHeight <= 0
-            || android.os.SystemClock.elapsedRealtime() - current.timestampMs > 550L) {
-            return false;
-        }
-        if (current.state != AnalysisResult.State.READY
-            && current.state != AnalysisResult.State.HOLD_STILL) {
-            return false;
-        }
-        return OpenCvDocumentEngine.quadDistance(
-            captureReferenceQuad,
-            current.detection.quad,
-            latestFrameWidth,
-            latestFrameHeight
-        ) <= 0.045f;
     }
 
     private MeteringPoint meteringPoint(AnalysisResult analysis, int frameWidth, int frameHeight) {
@@ -1353,15 +1281,14 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
     private ScanChecks parseChecks(JSONObject value) {
         JSONObject source = value == null ? new JSONObject() : value;
         return new ScanChecks(
-            source.optBoolean("documentSize", true),
+            source.optBoolean("documentSize", false),
             source.optBoolean("centering", false),
-            source.optBoolean("perspective", true),
+            source.optBoolean("perspective", false),
             source.optBoolean("stability", false),
             source.optBoolean("sharpness", true),
             source.optBoolean("brightness", true),
             source.optBoolean("glare", false),
-            source.optBoolean("shadows", false),
-            source.optBoolean("edgeOcclusion", false)
+            source.optBoolean("shadows", false)
         );
     }
 
@@ -1375,7 +1302,6 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
         json.put("brightness", checks.brightness);
         json.put("glare", checks.glare);
         json.put("shadows", checks.shadows);
-        json.put("edgeOcclusion", checks.edgeOcclusion);
         return json;
     }
 
@@ -1557,7 +1483,7 @@ public final class DniScannerActivity extends Activity implements LifecycleOwner
 
     private float sharpnessScore(double variance) {
         return (float) Math.max(0.0, Math.min(1.0,
-            variance / (config.minSharpnessVariance * 4.0)
+            variance / (config.minStillSharpnessVariance * 4.0)
         ));
     }
 

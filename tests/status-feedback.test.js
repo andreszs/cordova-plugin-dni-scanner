@@ -40,7 +40,7 @@ assert(androidActivity.includes('overlayView.update(\n                visibleRes
 assert(androidActivity.includes('AnalysisResult.State.RETRYING'));
 assert(androidConfig.includes('instructionStateConfirmationMs = 650L'));
 assert(androidConfig.includes('instructionLossGraceMs = 500L'));
-assert(androidConfig.includes('retryMessageDurationMs = 1000L'));
+assert(androidConfig.includes('retryMessageDurationMs = 300L'));
 
 assert(iosTypes.includes('case retrying'));
 assert(iosTypes.includes('case success'));

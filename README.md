@@ -114,14 +114,13 @@ const result = await DniScanner.scan({
     preferredCaptureLongEdge: 2048,
     maxOutputLongEdge: 1280,
     minEffectiveDocumentLongEdge: 0,
-    minStillSharpnessVariance: 90,
+    minStillSharpnessVariance: 55,
     instructionText: "Ubicá el frente del DNI en el recuadro",
     checks: {
         centering: false,
         stability: false,
         glare: false,
-        shadows: false,
-        edgeOcclusion: false
+        shadows: false
     },
     timeoutMs: 45000
 });
@@ -137,8 +136,9 @@ Use `side: "back"` to capture the back.
 
 The dotted rectangle is an aiming guide rather than a hard crop boundary. A DNI
 may extend beyond it on any side. Both platforms search a larger safe viewport
-while using the guide only as a scoring target. All four physical edges and a
-small source-image clearance are still mandatory.
+while using the guide only as a scoring target. The complete four-corner document
+is still mandatory, but no fixed amount of decorative background is required.
+The crop retains as much safe, balanced padding as the source image provides.
 
 For a credit/debit card, driver's license, or another ISO ID-1-sized card, use the
 content-agnostic profile:
@@ -152,10 +152,9 @@ const result = await DniScanner.scan({
 });
 ```
 
-This profile keeps geometric detection, crop completeness, perspective, focus,
-exposure, motion, and severe reflection/shadow checks. It does not run DNI
-side/variant recognition, and it avoids treating printed colors as skin or edge
-obstructions.
+This profile keeps geometric detection, focus, exposure, motion, and optional
+perspective/reflection/shadow checks. It does not run DNI
+side/variant recognition or color-based occlusion heuristics.
 
 ### Options
 
@@ -174,9 +173,9 @@ obstructions.
 | `preferredCaptureLongEdge` | integer `1280–2048` | `1600` | Preferred long edge for the native camera capture. Each platform selects the closest supported size, preferring a higher resolution before falling back to a lower one. |
 | `maxOutputLongEdge` | integer `640–2048` | `1280` | Independent maximum long edge of the cropped JPEG. The plugin never enlarges a document that contains fewer effective pixels. |
 | `minEffectiveDocumentLongEdge` | integer `0–4096` | `0` | Minimum native-pixel long edge measured on the detected document. A smaller photo is discarded and capture resumes. Zero keeps the legacy behavior and disables this gate; `1000` is recommended when OCR detail matters. |
-| `minStillSharpnessVariance` | number `1–10000` | Android `90`, iOS `70` | Minimum Laplacian variance of the cropped still photo when `checks.sharpness` is enabled. The preview uses a lower advisory threshold so AF/AE and the final still remain authoritative. |
+| `minStillSharpnessVariance` | number `1–10000` | `55` | Minimum Laplacian variance used consistently by preview and final cropped-photo validation when `checks.sharpness` is enabled. |
 | `instructionText` | `string \| null` | `""` | Optional text above the guide. Missing, empty, or `null` hides it. |
-| `checks` | `object \| null` | OCR-friendly defaults | `documentSize`, `perspective`, `sharpness`, and `brightness` default to enabled. `centering`, `stability`, `glare`, `shadows`, and `edgeOcclusion` default to disabled. |
+| `checks` | `object \| null` | OCR-friendly defaults | `sharpness` and `brightness` default to enabled. Framing, perspective, stability, glare, and shadows are advisory unless explicitly enabled. |
 | `timeoutMs` | integer `>= 0` | `0` | Maximum session duration. Zero disables the timeout. |
 
 Only one scan may run at a time.
@@ -195,7 +194,6 @@ Only one scan may run at a time.
 | `brightness` | Rejects under/overexposure and severe clipping. |
 | `glare` | Rejects large localized reflections. |
 | `shadows` | Rejects strong uneven illumination. |
-| `edgeOcclusion` | Retained for API compatibility. The new detector always requires a complete four-corner document; it no longer runs the former color-based finger heuristic. |
 
 Four-corner convex document detection and crop completeness are always required. Disabling another check reduces capture guarantees.
 
@@ -268,8 +266,7 @@ A successful scan resolves with metadata and a temporary JPEG:
     "sharpness": true,
     "brightness": true,
     "glare": true,
-    "shadows": true,
-    "edgeOcclusion": true
+    "shadows": true
   },
   "recognitionSignals": ["printed_content"],
   "perspectiveCorrected": false,
@@ -361,14 +358,14 @@ Quality rejection does not produce `PROCESSING_FAILED`; the image is discarded a
 - Android uses CameraX `Preview`, `ImageAnalysis`, and `ImageCapture`. A bundled OpenCV engine runs contour proposals from Canny, difference-of-Gaussians, CLAHE, and adaptive-threshold strategies. Candidates must have evidence on all four sides and are ranked against the guide and the active track.
 - Android follows the chosen quadrilateral with pyramidal Lucas-Kanade optical flow, periodically anchors it with a full contour pass, smooths corner motion, and measures stability from normalized displacement, area change, and elapsed time.
 - iOS uses `AVCaptureVideoPreviewLayer`, `AVCaptureVideoDataOutput`, and `AVCapturePhotoOutput`. `VNDetectDocumentSegmentationRequest` is the primary detector, `VNDetectRectanglesRequest` is the native fallback, and `VNTrackRectangleRequest` maintains the document between full detections.
-- Both platforms analyze reduced preview frames away from the UI thread, start AF/AE while the track is settling, and keep analysis active through focusing. With the default `autoCapture: true`, capture is automatic and no manual button is created; with `autoCapture: false`, automatic capture is disabled and the native **Capturar** button performs the existing manual capture flow. Once capture starts, small preview or sensor changes do not cancel the shutter; the still photo confirms borders, focus, and exposure.
+- Both platforms analyze reduced preview frames away from the UI thread, start AF/AE while the track is settling, and keep analysis active until the photograph is available. With the default `autoCapture: true`, capture is automatic and no manual button is created; with `autoCapture: false`, automatic capture is disabled and the native **Capturar** button performs the existing manual capture flow. The latest confirmed preview track is the authoritative crop geometry. The still detector may refine it when both agree, but failure to rebuild a closed JPEG contour or a small shutter-latency displacement does not discard the photograph.
 - The portrait guide uses about 80% of the viewport width and the landscape guide about 72%. Detection is decoupled from that guide and searches the safe viewport, so size and centering influence ranking or instructions rather than acting as a guide boundary.
-- Framing, optional perspective, focus, and exposure are checked before capture and rechecked on the photograph. The returned JPEG is an axis-aligned bounding crop that targets 6% padding independently on each side; a complete document with at least 1.75% available clearance is accepted with `reduced_padding`. It never straightens or warps the detected quadrilateral.
+- Focus and exposure use one shared policy from preview through the final photograph. The returned JPEG is an axis-aligned bounding crop that targets 6% padding independently on each side and keeps all available padding near image boundaries. It never straightens or warps the detected quadrilateral.
 - Exposure validation treats pale DNI v1/v2 stock separately from true overexposure: `Demasiada luz` requires both a very high document-wide mean luminance and more than 65% highlight clipping. A locally blown reflection remains independently rejectable as glare, so white paper no longer fails solely because much of its surface is naturally bright.
 - Android and iOS record gyroscope and acceleration data as diagnostics. Normal hand motion never changes `READY` back to `HOLD_STILL`, never blocks the manual button, and never cancels a capture already in progress. Final still-image sharpness is authoritative.
 - Both platforms confirm a compatible quadrilateral for two frames and roughly 200–220 ms, retain a track across up to five missed frames, and use entry/exit hysteresis so one detector fluctuation does not regress progress.
-- Crop integrity is mandatory: every detected side must retain at least the minimum source clearance. Desired padding is reduced independently per side rather than rejecting an otherwise complete card.
-- Stable valid frames trigger center-of-document focus and exposure metering. The UI distinguishes `Enfocando…`, `Tomando foto`, and `Procesando imagen…`: capture proceeds as soon as AF/AE settles or after a bounded 425 ms fallback, and the live camera preview remains visible while local validation runs.
+- Desired padding is reduced independently per side rather than rejecting an otherwise complete card solely because little background remains around it.
+- Stable valid frames trigger center-of-document focus and exposure metering while tracking. Android captures immediately after `READY`; iOS retains its bounded focus transaction. The live camera preview remains visible while local validation runs.
 - `preferredCaptureLongEdge` controls the native capture target (1600 px by default; `2048` is supported with CameraX's closest-higher-then-lower fallback), while `maxOutputLongEdge` independently caps the cropped JPEG at 1280 px by default. JPEG quality remains 95 and a low-resolution document is never enlarged. Colors and captured geometry are preserved without paper-scanner filters.
 - In landscape, the guide leaves additional physical margin around the card. Instruction and status messages move inside the top and bottom of the guide so they do not reserve vertical capture space.
 - In the default `dni` profile, a position-independent printed-content score is returned for downstream diagnostics and never blocks capture. In `advisory` or `strict`, a compact 4×3 edge/saturation classifier also estimates side and generation; those estimates remain heuristic and variant never blocks capture. The `genericCard` profile skips those content heuristics and applies quality thresholds suited to visually diverse ID-1 cards.

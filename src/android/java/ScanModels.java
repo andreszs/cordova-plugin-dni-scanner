@@ -556,11 +556,10 @@ final class ScanChecks {
     final boolean brightness;
     final boolean glare;
     final boolean shadows;
-    final boolean edgeOcclusion;
 
     ScanChecks(boolean documentSize, boolean centering, boolean perspective,
                boolean stability, boolean sharpness, boolean brightness,
-               boolean glare, boolean shadows, boolean edgeOcclusion) {
+               boolean glare, boolean shadows) {
         this.documentSize = documentSize;
         this.centering = centering;
         this.perspective = perspective;
@@ -569,11 +568,16 @@ final class ScanChecks {
         this.brightness = brightness;
         this.glare = glare;
         this.shadows = shadows;
-        this.edgeOcclusion = edgeOcclusion;
     }
 
     static ScanChecks defaults() {
-        return new ScanChecks(true, false, true, false, true, true, false, false, false);
+        return new ScanChecks(false, false, false, false, true, true, false, false);
+    }
+
+    ScanChecks qualityOnly() {
+        return new ScanChecks(
+            false, false, false, false, sharpness, brightness, glare, shadows
+        );
     }
 }
 
